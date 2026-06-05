@@ -141,6 +141,15 @@
   .swatch.active{border-color:var(--sumi);box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--sumi)}
   .swatch.active::after{content:"";position:absolute;inset:0;border-radius:50%}
   .tool-label{font-size:12px;color:var(--ink-faint);font-weight:500;min-width:40px}
+  .brush-seg{display:flex;gap:0;border-radius:8px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(140,110,60,.35);flex:1}
+  .brush-opt{
+    flex:1;border:none;cursor:pointer;background:transparent;color:var(--ink-faint);
+    font-family:"Shippori Mincho",serif;font-weight:700;font-size:13px;letter-spacing:.08em;
+    padding:7px 4px;
+  }
+  .brush-opt + .brush-opt{box-shadow:inset 1px 0 0 rgba(140,110,60,.35)}
+  .brush-opt.active{background:var(--shu);color:var(--paper)}
+  .brush-opt:not(.active):hover{background:rgba(181,52,31,.1)}
   input[type=range]{flex:1;accent-color:var(--sumi)}
 
   .name-field{
@@ -484,6 +493,13 @@
           <span class="tool-label">太さ</span>
           <input type="range" id="size" min="4" max="44" value="14">
         </div>
+        <div class="row">
+          <span class="tool-label">筆</span>
+          <div class="brush-seg" id="brushSeg">
+            <button class="brush-opt active" data-brush="taper">先細</button>
+            <button class="brush-opt" data-brush="flat">平筆</button>
+          </div>
+        </div>
 
         <input class="name-field" id="who" type="text" maxlength="16" placeholder="名前（としあき / 「」 / jun君…）">
 
@@ -560,6 +576,8 @@ const PAPER = "#f7f4ec";
 let color = "#1a1714";
 let size = 14;
 let erasing = false;
+let brushType = "taper";              // "taper"=先細, "flat"=平筆
+const NIB = -35 * Math.PI/180;        // 平筆のニブ角度
 let drawing = false;
 let last = null;
 let lastTime = 0;
@@ -592,12 +610,31 @@ function pushUndo(){
 function start(e){
   e.preventDefault(); pushUndo();
   drawing = true; last = pos(e); lastTime = performance.now();
+  if(!erasing && brushType==="flat"){ flatDab(last); return; }
   lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.35)*DPR; // 入り：細く始まる
   dot(last, lastWidth);
+}
+function flatNib(){ const h=size/2*DPR; return { nx:Math.cos(NIB)*h, ny:Math.sin(NIB)*h }; }
+function flatDab(p){
+  const {nx,ny}=flatNib();
+  ctx.strokeStyle=color; ctx.lineWidth=Math.max(2, size*0.16*DPR); ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(p.x+nx,p.y+ny); ctx.lineTo(p.x-nx,p.y-ny); ctx.stroke();
+}
+function flatSeg(a,b){
+  const {nx,ny}=flatNib();
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.moveTo(a.x+nx,a.y+ny); ctx.lineTo(b.x+nx,b.y+ny);
+  ctx.lineTo(b.x-nx,b.y-ny); ctx.lineTo(a.x-nx,a.y-ny);
+  ctx.closePath(); ctx.fill();
+  flatDab(b); // 先端のニブで継ぎ目をなめらかに
 }
 function move(e){
   if(!drawing) return; e.preventDefault();
   const p = pos(e);
+
+  if(!erasing && brushType==="flat"){ flatSeg(last, p); last = p; return; }
+
   const now = performance.now();
   const dx = p.x-last.x, dy = p.y-last.y;
   const dist = Math.hypot(dx,dy);
@@ -650,6 +687,12 @@ document.getElementById("colors").addEventListener("click",e=>{
   if(c==="ERASER"){ erasing=true; } else { erasing=false; color=c; }
 });
 document.getElementById("size").addEventListener("input",e=>{ size=+e.target.value; });
+document.getElementById("brushSeg").addEventListener("click",e=>{
+  const b = e.target.closest(".brush-opt"); if(!b) return;
+  document.querySelectorAll(".brush-opt").forEach(o=>o.classList.remove("active"));
+  b.classList.add("active");
+  brushType = b.dataset.brush;
+});
 function doUndo(){ const s=undoStack.pop(); if(s) ctx.putImageData(s,0,0); }
 document.getElementById("undo").addEventListener("click", doUndo);
 document.getElementById("clear").addEventListener("click",()=>{ pushUndo(); ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); });
@@ -816,6 +859,8 @@ function enterPlacing(){
   wallEl.classList.add("placing");
   postBtn.textContent = "場所を選ぶ…";
   setMsg('<div class="placing-hint"><span>掲示板の貼りたい場所をクリック／タップ</span><span class="cancel" onclick="cancelPlacing()">やめる</span></div>');
+  deskPrevCollapsed = floatDesk.classList.contains("collapsed");
+  setDeskCollapsed(true);   // 場所選び中は「半紙にかく」を最小化
   scrollEl.scrollIntoView({behavior:"smooth", block:"nearest"});
 }
 function cancelPlacing(){
@@ -823,6 +868,7 @@ function cancelPlacing(){
   ghostEl.classList.remove("show");
   wallEl.classList.remove("placing");
   postBtn.textContent = "貼 る";
+  setDeskCollapsed(deskPrevCollapsed);
   render();
 }
 window.cancelPlacing = cancelPlacing;
@@ -878,6 +924,7 @@ async function createPost(nx, ny){
     // 後片付け
     placing = false; ghostEl.classList.remove("show"); wallEl.classList.remove("placing");
     postBtn.textContent = "貼 る";
+    setDeskCollapsed(deskPrevCollapsed);   // 「半紙にかく」を元の状態に戻す
     ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); undoStack=[];
     setMsg("");
     openAngleBar(angle);
@@ -1197,10 +1244,13 @@ function toast(msg){
 
 /* ---------- floating desk collapse ---------- */
 const floatDesk = document.getElementById("floatDesk");
-document.getElementById("deskToggle").addEventListener("click", ()=>{
-  const collapsed = floatDesk.classList.toggle("collapsed");
-  document.getElementById("deskToggle").textContent = collapsed ? "＋" : "−";
-});
+const deskToggleBtn = document.getElementById("deskToggle");
+let deskPrevCollapsed = false;
+function setDeskCollapsed(c){
+  floatDesk.classList.toggle("collapsed", c);
+  deskToggleBtn.textContent = c ? "＋" : "−";
+}
+deskToggleBtn.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
 
 /* ---------- init ---------- */
 setupCanvas();
