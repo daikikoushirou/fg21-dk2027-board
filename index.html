@@ -274,6 +274,7 @@
     transform-origin:50% 0;
     animation:drop .45s cubic-bezier(.2,.9,.3,1.2) both;
   }
+  .note.no-anim{animation:none}
   .note.mine{outline:2px solid var(--gold);outline-offset:2px;z-index:20}
   .note.is-hidden{opacity:.55;outline:2px dashed var(--shu);outline-offset:2px}
   .note img{display:block;width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:2px;background:#fff}
@@ -500,7 +501,7 @@
 
   <div class="anglebar" id="angleBar">
     <span class="lab">傾きの微調整</span>
-    <input type="range" id="angleRange" min="-30" max="30" step="1" value="0">
+    <input type="range" id="angleRange" min="-40" max="40" step="1" value="0">
     <span class="val" id="angleVal">0°</span>
     <button class="ok" id="angleOk">確定</button>
   </div>
@@ -721,10 +722,11 @@ let admin = false;
 let placing = false;        // 位置決め中
 let pendingImg = null;      // 貼る予定の画像
 let editingId = null;       // 角度微調整中の自分の投稿
+const renderedIds = new Set(); // 既に表示済みの半紙（登場アニメの再生抑制用）
 
 function tapeColor(){ const a=[ -5,-3,3,5,-2,2 ]; return a[Math.floor(Math.random()*a.length)]; }
 function esc(s){ return (s||"").replace(/[<>&"]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;",'"':"&quot;"}[c])); }
-function rndAngle(){ return Math.round(Math.random()*22) * (Math.random()<0.5?-1:1); } // 垂直から±22°
+function rndAngle(){ return Math.round(Math.random()*5) * (Math.random()<0.5?-1:1); } // 初期は垂直から±5°
 function hashFrac(str, salt){ let h=2166136261; const s=(str||"")+salt; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return ((h>>>0)%10000)/10000; }
 function nxOf(p,id){ return (typeof p.nx==="number") ? p.nx : hashFrac(id,"x"); }
 function nyOf(p,id){ return (typeof p.ny==="number") ? p.ny : hashFrac(id,"y"); }
@@ -759,6 +761,7 @@ function render(){
     const delCls = delDone.has(p.id) ? "del-btn done" : "del-btn";
     const hiddenBadge = p.hidden ? '<span class="hidden-badge">非表示</span>' : '';
     const mine = (p.id===editingId) ? " mine" : "";
+    const fresh = !renderedIds.has(p.id) ? "" : " no-anim";  // 既存はアニメ無し（ビクつき防止）
     const adminLine = admin ? `
       <div class="admin-line">
         <span class="stat">そうだね ${p.sou||0}</span>
@@ -768,7 +771,7 @@ function render(){
         <button class="mini del" onclick="adminDelete('${p.id}')">削除</button>
       </div>` : '';
     return `
-    <div class="note${mine} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)">
+    <div class="note${mine}${fresh} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)">
       <span class="tape" style="--r:${tapeColor()}deg"></span>
       <div class="imgwrap">${hiddenBadge}${imgHtml}</div>
       <div class="who">${esc(p.name)||"としあき"}</div>
@@ -779,6 +782,9 @@ function render(){
       ${adminLine}
     </div>`;
   }).join("");
+
+  renderedIds.clear();
+  visible.forEach(p=> renderedIds.add(p.id));
 
   if(typeof drawMinimap === "function") drawMinimap();
 }
@@ -884,31 +890,48 @@ async function createPost(nx, ny){
 
 /* ---------- angle adjust ---------- */
 let angleThrottle = 0;
+// スライダー値 → 実回転角。±20は直立で傾け、それを超えると180度反転（反転側でも±20）
+function vToRot(v){
+  if(v > 20)  return 180 + (v - 20);    // 20〜40 → 180〜200（反転して＋方向に傾く）
+  if(v < -20) return -180 + (v + 20);   // -40〜-20 → -180〜-200（反転して−方向に傾く）
+  return v;                              // -20〜20 → 直立で傾く
+}
+function angleLabel(rot){
+  if(rot >= -20 && rot <= 20) return rot + "°";
+  const ft = rot > 0 ? rot - 180 : rot + 180; // 反転時の傾き -20〜20
+  return "反転 " + (ft >= 0 ? "+" : "") + ft + "°";
+}
+function setNoteTransform(id, rot){
+  const el = notesEl.querySelector('.note[data-id="'+id+'"]');
+  if(el) el.style.transform = "rotate("+rot+"deg)";
+}
 function openAngleBar(angle){
-  angleRange.value = angle;
-  angleVal.textContent = angle + "°";
+  angleRange.value = angle;            // 初期角は±5なので直立帯＝スライダー値そのまま
+  angleVal.textContent = angleLabel(angle);
   angleBar.classList.add("show");
 }
 function applyAngle(write){
   if(!editingId) return;
-  const a = +angleRange.value;
-  angleVal.textContent = a + "°";
-  const p = posts.get(editingId); if(p){ p.angle = a; }
-  render();
-  if(write && db){ update(ref(db, "posts/"+editingId), { angle:a }).catch(()=>{}); }
+  const rot = vToRot(+angleRange.value);
+  angleVal.textContent = angleLabel(rot);
+  const p = posts.get(editingId); if(p){ p.angle = rot; }
+  setNoteTransform(editingId, rot);    // 全体再描画せず、その半紙だけ回す
+  if(write && db){ update(ref(db, "posts/"+editingId), { angle:rot }).catch(()=>{}); }
 }
-angleRange.addEventListener("input", ()=>{
-  const now = Date.now();
-  if(now - angleThrottle > 140){ angleThrottle = now; applyAngle(true); }
-  else applyAngle(false);
-});
-angleRange.addEventListener("change", ()=> applyAngle(true));
-angleOk.addEventListener("click", ()=>{
-  applyAngle(true);
+function closeAngle(){
+  if(!angleBar.classList.contains("show")) return;
+  applyAngle(true);                    // 最終角を確定・保存
   angleBar.classList.remove("show");
+  const el = editingId ? notesEl.querySelector('.note[data-id="'+editingId+'"]') : null;
   editingId = null;
-  render();
-  toast("確定しました");
+  if(el) el.classList.remove("mine");
+}
+angleRange.addEventListener("input", ()=> applyAngle(false));   // ドラッグ中はローカルだけ更新（DB書き込み無し）
+angleRange.addEventListener("change", ()=> applyAngle(true));   // 指を離したら保存
+angleOk.addEventListener("click", closeAngle);
+// バーの外をクリック／タップしても確定
+document.addEventListener("pointerdown", e=>{
+  if(angleBar.classList.contains("show") && !angleBar.contains(e.target)) closeAngle();
 });
 
 /* ---------- voting (transaction) ---------- */
@@ -1107,7 +1130,8 @@ function visibleByRecency(){
     .sort((a,b)=> (b[1].t||0)-(a[1].t||0));
 }
 function centerOnNote(id, p){
-  const z = Math.max(zoom, 0.8);
+  const target = (window.innerWidth <= 560) ? 1.0 : 1.3;  // PCは130%、モバイルは100%
+  const z = clamp(target, zoomMin, ZOOM_MAX);
   if(z !== zoom){ zoom = z; applyZoom(); }
   const px = (clamp(nxOf(p,id),0,1)*(WALL_W-NOTE_W) + NOTE_W/2) * zoom;
   const py = (clamp(nyOf(p,id),0,1)*(WALL_H-NOTE_H) + NOTE_H/2) * zoom;
