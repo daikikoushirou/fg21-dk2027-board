@@ -649,7 +649,8 @@ document.getElementById("colors").addEventListener("click",e=>{
   if(c==="ERASER"){ erasing=true; } else { erasing=false; color=c; }
 });
 document.getElementById("size").addEventListener("input",e=>{ size=+e.target.value; });
-document.getElementById("undo").addEventListener("click",()=>{ const s=undoStack.pop(); if(s) ctx.putImageData(s,0,0); });
+function doUndo(){ const s=undoStack.pop(); if(s) ctx.putImageData(s,0,0); }
+document.getElementById("undo").addEventListener("click", doUndo);
 document.getElementById("clear").addEventListener("click",()=>{ pushUndo(); ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); });
 
 /* ---------- export (downscaled) ---------- */
@@ -839,6 +840,14 @@ wallEl.addEventListener("click", async e=>{
   await createPost(nx, ny);
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape" && placing) cancelPlacing(); });
+document.addEventListener("keydown", e=>{
+  if((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key==="z" || e.key==="Z")){
+    const t = e.target;
+    if(t && (t.tagName==="INPUT" || t.tagName==="TEXTAREA")) return; // 入力欄では文字のUNDOを優先
+    e.preventDefault();
+    doUndo();
+  }
+});
 
 /* ---------- create / post ---------- */
 const postBtn = document.getElementById("post");
