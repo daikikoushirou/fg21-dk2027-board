@@ -27,7 +27,7 @@
     background:#e7ddc6;
   }
 
-  .stage{position:relative;width:100vw;height:100vh;overflow:hidden;-webkit-user-select:none;user-select:none}
+  .stage{position:relative;width:100vw;height:100vh;height:100dvh;overflow:hidden;-webkit-user-select:none;user-select:none}
   .stage img{-webkit-user-drag:none;user-drag:none;pointer-events:none}
   input,textarea{-webkit-user-select:text;user-select:text}
 
@@ -98,7 +98,8 @@
   .desk-bar-title::before{content:"";width:13px;height:13px;background:var(--shu);border-radius:3px;display:inline-block;transform:rotate(-6deg)}
   .desk-toggle{
     width:26px;height:26px;border-radius:7px;border:none;cursor:pointer;
-    background:#d8c8a2;color:var(--ink-faint);font-size:16px;font-weight:700;line-height:1;
+    background:#d8c8a2;color:var(--ink-faint);font-size:18px;font-weight:700;line-height:1;
+    display:flex;align-items:center;justify-content:center;padding:0;
   }
   .desk-toggle:hover{filter:brightness(1.04)}
   .desk-body{padding:0 16px 16px}
@@ -106,6 +107,8 @@
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
   @media(max-width:560px){
     .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:70px}
+    .zoom-ctl{display:none}
+    .float-tools{padding:7px 11px}
   }
   .canvas-frame{
     background:var(--paper);
@@ -222,6 +225,7 @@
     background:#e7ddc6;
     -webkit-overflow-scrolling:touch;
     cursor:grab;
+    touch-action:pan-x pan-y;
     scrollbar-width:thin;
     scrollbar-color:#a7402b #d8cdb2;
   }
@@ -328,7 +332,7 @@
 
   /* angle adjust bar (floating bottom-center) */
   .anglebar{
-    position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:26;
+    position:absolute;left:50%;bottom:84px;transform:translateX(-50%);z-index:26;
     display:none;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;
     width:min(440px,calc(100vw - 32px));
     padding:10px 16px;border-radius:12px;
@@ -347,7 +351,7 @@
 
   /* nav cluster: 半紙めぐり + ミニマップ */
   .nav-cluster{
-    position:absolute;right:14px;bottom:14px;z-index:24;
+    position:fixed;right:14px;bottom:14px;z-index:24;
     display:flex;flex-direction:column;align-items:flex-end;gap:8px;
   }
   .meguri{
@@ -416,7 +420,7 @@
     background:var(--sumi);color:var(--paper);
     font-family:"Shippori Mincho",serif;letter-spacing:.1em;
     padding:11px 22px;border-radius:30px;font-size:14px;
-    opacity:0;pointer-events:none;transition:.3s;z-index:50;
+    opacity:0;pointer-events:none;transition:.3s;z-index:60;
     box-shadow:0 6px 20px rgba(0,0,0,.4);
   }
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -786,7 +790,11 @@ function listen(){
   if(!db){ showConnError(); return; }
   const postsRef = ref(db, "posts");
   try{
-    onChildAdded(postsRef, snap=>{ posts.set(snap.key, snap.val()||{}); render(); });
+    onChildAdded(postsRef, snap=>{
+      posts.set(snap.key, snap.val()||{});
+      render();
+      if(!didInitialFocus){ clearTimeout(focusTimer); focusTimer = setTimeout(initialFocus, 500); }
+    });
     onChildChanged(postsRef, snap=>{ posts.set(snap.key, snap.val()||{}); render(); });
     onChildRemoved(postsRef, snap=>{ posts.delete(snap.key); render(); });
     setTimeout(()=>{ if(!posts.size) render(); }, 1200);
@@ -859,7 +867,6 @@ async function createPost(nx, ny){
     setMsg("");
     openAngleBar(angle);
     render();
-    toast("貼りました！傾きを微調整できます");
   }catch(e){
     console.error(e); toast("貼れませんでした…"); showConnError();
   }
@@ -991,6 +998,29 @@ scrollEl.addEventListener("wheel", e=>{
   zoomTo(zoom + (e.deltaY<0 ? 0.1 : -0.1), e.clientX, e.clientY);
 }, {passive:false});
 
+// 2本指ピンチで拡大縮小（スマホ用。1本指は通常スクロール）
+let pinchActive=false, pinchStartDist=0, pinchStartZoom=1;
+function touchDist(a,b){ return Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY); }
+scrollEl.addEventListener("touchstart", e=>{
+  if(e.touches.length===2){
+    pinchActive=true;
+    pinchStartDist=touchDist(e.touches[0],e.touches[1]) || 1;
+    pinchStartZoom=zoom;
+    e.preventDefault();
+  }
+}, {passive:false});
+scrollEl.addEventListener("touchmove", e=>{
+  if(pinchActive && e.touches.length===2){
+    e.preventDefault();
+    const d = touchDist(e.touches[0],e.touches[1]);
+    const mx = (e.touches[0].clientX+e.touches[1].clientX)/2;
+    const my = (e.touches[0].clientY+e.touches[1].clientY)/2;
+    zoomTo(pinchStartZoom * (d/pinchStartDist), mx, my);
+  }
+}, {passive:false});
+scrollEl.addEventListener("touchend", e=>{ if(e.touches.length<2) pinchActive=false; });
+scrollEl.addEventListener("touchcancel", ()=>{ pinchActive=false; });
+
 // 左ドラッグでボード内を動かす（マウスのみ。タッチは標準スクロール）
 let panning=false, panMoved=false, panSX=0, panSY=0, panSL=0, panST=0, suppressClick=false;
 scrollEl.addEventListener("pointerdown", e=>{
@@ -1089,6 +1119,20 @@ function gotoNote(step){
 }
 document.getElementById("prevNote").addEventListener("click", ()=> gotoNote(-1));
 document.getElementById("nextNote").addEventListener("click", ()=> gotoNote(1));
+
+/* ---------- 起動時：貼られた半紙のどれかにランダムでフォーカス ---------- */
+let didInitialFocus = false;
+let focusTimer = null;
+function initialFocus(){
+  if(didInitialFocus) return;
+  const list = visibleByRecency();
+  if(!list.length) return;       // まだ無ければ何もしない（次の追加で再トライ）
+  didInitialFocus = true;
+  const i = Math.floor(Math.random()*list.length);
+  meguriIdx = i;
+  const [id,p] = list[i];
+  centerOnNote(id, p);
+}
 
 /* ---------- toast ---------- */
 let toastT=null;
