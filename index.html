@@ -1129,8 +1129,8 @@ function visibleByRecency(){
   return [...posts.entries()].filter(([id,p])=> admin || !p.hidden)
     .sort((a,b)=> (b[1].t||0)-(a[1].t||0));
 }
-function centerOnNote(id, p){
-  const target = (window.innerWidth <= 560) ? 1.0 : 1.3;  // PCは130%、モバイルは100%
+function centerOnNote(id, p, targetZoom){
+  const target = (targetZoom != null) ? targetZoom : ((window.innerWidth <= 560) ? 1.0 : 1.3);  // 既定: PC130%/モバイル100%
   const z = clamp(target, zoomMin, ZOOM_MAX);
   if(z !== zoom){ zoom = z; applyZoom(); }
   const px = (clamp(nxOf(p,id),0,1)*(WALL_W-NOTE_W) + NOTE_W/2) * zoom;
@@ -1164,7 +1164,7 @@ function initialFocus(){
   const i = Math.floor(Math.random()*list.length);
   meguriIdx = i;
   const [id,p] = list[i];
-  centerOnNote(id, p);
+  centerOnNote(id, p, 1.0);   // 開いたときは100%でフォーカス
 }
 
 /* ---------- toast ---------- */
