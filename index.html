@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>ふたば★お習字 オンライン</title>
+<title>ふたば(偽)お習字</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Yuji+Syuku&family=Shippori+Mincho:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
@@ -52,12 +52,12 @@
     text-shadow:0 1px 0 rgba(255,255,255,.4);
   }
   .seal{
-    display:inline-block;margin-left:8px;
-    width:28px;height:28px;line-height:28px;
-    background:var(--shu);color:var(--paper);
-    font-family:"Shippori Mincho",serif;border-radius:4px;font-size:14px;
+    display:inline-flex;align-items:center;justify-content:center;margin-left:8px;
+    width:28px;height:28px;
+    background:#2f7d3b;border-radius:4px;
     vertical-align:middle;transform:rotate(-4deg);box-shadow:0 1px 0 rgba(0,0,0,.3);
   }
+  .seal svg{width:18px;height:18px;display:block}
 
   /* floating tools (zoom + status) top-right */
   .float-tools{
@@ -97,7 +97,7 @@
     letter-spacing:.1em;color:var(--ink-faint);
     display:flex;align-items:center;gap:8px;
   }
-  .desk-bar-title::before{content:"";width:13px;height:13px;background:var(--shu);border-radius:3px;display:inline-block;transform:rotate(-6deg)}
+  .desk-bar-title::before{content:none}
   .desk-toggle{
     width:26px;height:26px;border-radius:7px;border:none;cursor:pointer;
     background:#d8c8a2;color:var(--ink-faint);font-size:18px;font-weight:700;line-height:1;
@@ -106,6 +106,7 @@
   .desk-toggle:hover{filter:brightness(1.04)}
   .desk-body{padding:0 16px 16px;overflow-y:auto;min-height:0;flex:1 1 auto;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
   .float-desk.collapsed .desk-body{display:none}
+  .float-desk.collapsed{width:auto;max-width:none}
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
   @media(max-width:560px){
     .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:70px;max-height:calc(100dvh - 80px)}
@@ -177,6 +178,7 @@
   }
   button:active{transform:scale(.97)}
   .btn-ghost{
+    flex:1;min-width:0;padding:11px 8px;font-size:13px;
     background:#e2d4b2;color:var(--ink-faint);
     box-shadow:inset 0 0 0 1px rgba(140,110,60,.25);
   }
@@ -457,8 +459,8 @@
   </div>
 
   <header class="float-header">
-    <div class="title">ふたば(<span class="shu">偽</span>)お習字<span class="seal">習</span></div>
-    <div class="subtitle">オンライン版 ── 会場に来られなくてもお習字できる</div>
+    <div class="title">ふたば(<span class="shu">偽</span>)お習字<span class="seal" title="ふたば"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21 C12 17, 12 14, 12 10.5" stroke="#fff" stroke-width="2.2" fill="none" stroke-linecap="round"/><path d="M12 12.5 C7.5 12.5, 4.5 9.5, 4.5 5.2 C9 5.2, 12 8.2, 12 12.5 Z" fill="#fff"/><path d="M12 12.5 C16.5 12.5, 19.5 9.5, 19.5 5.2 C15 5.2, 12 8.2, 12 12.5 Z" fill="#fff"/></svg></span></div>
+    <div class="subtitle">本家が実装されたら即閉鎖</div>
   </header>
 
   <div class="float-tools">
@@ -476,7 +478,7 @@
   <!-- 浮いている半紙パネル -->
   <section class="float-desk" id="floatDesk">
     <div class="desk-bar">
-      <span class="desk-bar-title">半紙にかく</span>
+      <span class="desk-bar-title">半紙</span>
       <button class="desk-toggle" id="deskToggle" title="しまう／ひらく">−</button>
     </div>
     <div class="desk-body" id="deskBody">
@@ -496,6 +498,7 @@
           <div class="swatch" data-color="#b5341f" style="background:#b5341f"></div>
           <div class="swatch" data-color="#1d5a8c" style="background:#1d5a8c"></div>
           <div class="swatch" data-color="#2f7d3b" style="background:#2f7d3b"></div>
+          <div class="swatch" data-color="#e6b800" style="background:#e6b800"></div>
           <div class="swatch" data-color="ERASER" style="background:#f7f4ec" title="消しゴム"></div>
         </div>
         <div class="row">
@@ -514,10 +517,8 @@
 
         <div class="btns" style="margin-bottom:8px">
           <button class="btn-ghost" id="undo">もどす</button>
-          <button class="btn-ghost" id="clear">全消し</button>
-        </div>
-        <div class="btns" style="margin-bottom:8px">
-          <button class="btn-ghost" id="photoBtn">現場のお習字を写真でのせる</button>
+          <button class="btn-ghost" id="clear">消去</button>
+          <button class="btn-ghost" id="photoBtn">写真読込</button>
         </div>
         <input type="file" id="photoInput" accept="image/*" style="display:none">
         <div class="btns">
@@ -597,6 +598,7 @@ let lastTime = 0;
 let lastWidth = 0;
 let lastDir = null;   // 直近の運筆方向（抜きの三角テールに使う）
 let penOff = false;   // 描画中にカーソルが描画エリア外に出ているか
+let strokeLen = 0;    // ストローク開始からの累積距離（入りの筆圧ランプ用）
 let undoStack = [];
 
 function setupCanvas(){
@@ -624,31 +626,32 @@ function pushUndo(){
 }
 function start(e){
   e.preventDefault(); pushUndo();
-  drawing = true; last = pos(e); lastTime = performance.now(); lastDir = null; penOff = false;
+  drawing = true; last = pos(e); lastTime = performance.now(); lastDir = null; penOff = false; strokeLen = 0;
   if(!erasing && brushType==="flat"){ flatDab(last); return; }
-  lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.16)*DPR; // 入り：かなり細く始める
+  lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.12)*DPR; // 入り：ごく細い種点から
   dot(last, lastWidth);
 }
 function flatNib(){ const h=size/2*DPR; return { nx:Math.cos(NIB)*h, ny:Math.sin(NIB)*h }; }
 function flatDab(p){
   const {nx,ny}=flatNib();
-  ctx.strokeStyle=color; ctx.lineWidth=Math.max(2, size*0.16*DPR); ctx.lineCap="round";
+  ctx.strokeStyle=color; ctx.lineWidth=Math.max(2, size*0.18*DPR); ctx.lineCap="round";
   ctx.beginPath(); ctx.moveTo(p.x+nx,p.y+ny); ctx.lineTo(p.x-nx,p.y-ny); ctx.stroke();
 }
-function flatSeg(a,b){
+// a→b をニブ（固定角の平筆）で連続的に塗る。点が飛んでもドットにならないよう細かく補間
+function flatStroke(a,b){
   const {nx,ny}=flatNib();
-  ctx.fillStyle=color;
-  ctx.beginPath();
-  ctx.moveTo(a.x+nx,a.y+ny); ctx.lineTo(b.x+nx,b.y+ny);
-  ctx.lineTo(b.x-nx,b.y-ny); ctx.lineTo(a.x-nx,a.y-ny);
-  ctx.closePath(); ctx.fill();
-  flatDab(b); // 先端のニブで継ぎ目をなめらかに
+  const lw = Math.max(2, size*0.18*DPR);
+  const d = Math.hypot(b.x-a.x, b.y-a.y);
+  const n = Math.max(1, Math.ceil(d/(lw*0.5)));   // ニブ太さより細かい間隔で重ねる
+  ctx.strokeStyle=color; ctx.lineWidth=lw; ctx.lineCap="round";
+  for(let i=0;i<=n;i++){
+    const t=i/n, x=a.x+(b.x-a.x)*t, y=a.y+(b.y-a.y)*t;
+    ctx.beginPath(); ctx.moveTo(x+nx,y+ny); ctx.lineTo(x-nx,y-ny); ctx.stroke();
+  }
 }
-function resumeAt(p){            // エリアに戻った／描き始め：継ぎ目なく再開（線でつながない）
+function resumeAt(p){            // エリアに戻った：同じ太さのまま継ぎ目なく再開（線でつながない）
   penOff = false;
   last = p; lastTime = performance.now(); lastDir = null;
-  if(!erasing && brushType==="flat"){ flatDab(p); }
-  else { lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.16)*DPR; dot(p, lastWidth); }
 }
 function move(e){
   if(!drawing) return; e.preventDefault();
@@ -657,7 +660,7 @@ function move(e){
   if(!inside){ penOff = true; return; }     // 外：描かない・ストロークも終わらせない
   if(penOff || !last){ resumeAt(p); return; } // 戻ってきた→同じストロークとして再開
 
-  if(!erasing && brushType==="flat"){ flatSeg(last, p); last = p; return; }
+  if(!erasing && brushType==="flat"){ flatStroke(last, p); last = p; return; }
 
   const now = performance.now();
   const dx = p.x-last.x, dy = p.y-last.y;
@@ -669,10 +672,12 @@ function move(e){
     targetW = size*2*DPR;
   } else {
     const base = size*DPR;
-    const speed = dist/dt;                 // px/ms
-    // 速いほど細く、ゆっくりだと太く。コントラストを強めて三角形っぽく
-    const f = Math.max(0.06, Math.min(1.7, 1.7 - speed*0.7));
-    targetW = base*f;
+    strokeLen += dist;
+    const speed = dist/dt;                          // px/ms
+    const f = Math.max(0.2, Math.min(1.5, 1.5 - speed*0.6));  // 速いほど細く
+    const head = Math.min(1, strokeLen/(base*1.8)); // 入り：開始からの距離で徐々に太く（筆圧風）
+    const headMul = 0.12 + 0.88*head;
+    targetW = base * f * headMul;
   }
   // なめらかに太さを変化させる
   const w = erasing ? targetW : lastWidth + (targetW-lastWidth)*0.35;
@@ -689,18 +694,18 @@ function move(e){
   if(dist>0.5){ lastDir = { x:dx/dist, y:dy/dist }; }
   last = p; lastTime = now; lastWidth = w;
 }
-// 抜き：運筆方向に少し延長しながら0へ細める（三角の先端）
+// 抜き：運筆方向に少しだけ延長して細める（針にならないよう先端は少し残す）
 function taperTail(){
-  if(!last || !lastDir || lastWidth<=0.5) return;
-  const steps = 6;
-  const len = Math.min(lastWidth*2.4, size*DPR*1.6);
+  if(!last || !lastDir || lastWidth<=0.6) return;
+  const steps = 4;
+  const len = Math.min(lastWidth*0.8, size*DPR*0.5);
   let x = last.x, y = last.y, w0 = lastWidth;
   ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for(let i=1;i<=steps;i++){
     const nx = last.x + lastDir.x*(len*i/steps);
     const ny = last.y + lastDir.y*(len*i/steps);
-    const w1 = lastWidth*(1 - i/steps);
-    ctx.lineWidth = Math.max(0.4, (w0+w1)/2);
+    const w1 = lastWidth*(1 - 0.7*(i/steps));   // 0.3倍までで止める（鋭すぎる三角を避ける）
+    ctx.lineWidth = Math.max(0.5, (w0+w1)/2);
     ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(nx,ny); ctx.stroke();
     x = nx; y = ny; w0 = w1;
   }
@@ -1171,10 +1176,12 @@ function setNoteTransform(id, rot){
   const el = notesEl.querySelector('.note[data-id="'+id+'"]');
   if(el) el.style.transform = "rotate("+rot+"deg)";
 }
+let angleOpenedAt = 0;
 function openAngleBar(angle){
   angleRange.value = angle;            // 初期角は±5なので直立帯＝スライダー値そのまま
   angleVal.textContent = angleLabel(angle);
   angleBar.classList.add("show");
+  angleOpenedAt = Date.now();          // この直後の外側タップでは閉じない（配置タップの誤確定防止）
 }
 function applyAngle(write){
   if(!editingId) return;
@@ -1195,9 +1202,9 @@ function closeAngle(){
 angleRange.addEventListener("input", ()=> applyAngle(false));   // ドラッグ中はローカルだけ更新（DB書き込み無し）
 angleRange.addEventListener("change", ()=> applyAngle(true));   // 指を離したら保存
 angleOk.addEventListener("click", closeAngle);
-// バーの外をクリック／タップしても確定
+// バーの外をクリック／タップしても確定（ただし開いた直後の一瞬は無視＝配置タップで誤確定しない）
 document.addEventListener("pointerdown", e=>{
-  if(angleBar.classList.contains("show") && !angleBar.contains(e.target)) closeAngle();
+  if(angleBar.classList.contains("show") && (Date.now()-angleOpenedAt > 400) && !angleBar.contains(e.target)) closeAngle();
 });
 
 /* ---------- voting (transaction) ---------- */
@@ -1502,6 +1509,9 @@ setupCanvas();
   const hi = Math.round(+sl.min + (+sl.max - +sl.min)*0.4);
   size = lo + Math.floor(Math.random()*(hi-lo+1));
   sl.value = size;
+  // 筆の種類もランダム（先細／平筆）
+  brushType = Math.random()<0.5 ? "taper" : "flat";
+  document.querySelectorAll(".brush-opt").forEach(o=> o.classList.toggle("active", o.dataset.brush===brushType));
 })();
 if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Shippori Mincho"').catch(()=>{}); }
 computeZoomMin();
