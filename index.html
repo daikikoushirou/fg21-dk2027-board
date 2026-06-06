@@ -509,6 +509,7 @@
           <span class="tool-label">筆</span>
           <div class="brush-seg" id="brushSeg">
             <button class="brush-opt active" data-brush="taper">先細</button>
+            <button class="brush-opt" data-brush="round">丸筆</button>
             <button class="brush-opt" data-brush="flat">平筆</button>
           </div>
         </div>
@@ -628,6 +629,7 @@ function start(e){
   e.preventDefault(); pushUndo();
   drawing = true; last = pos(e); lastTime = performance.now(); lastDir = null; penOff = false; strokeLen = 0;
   if(!erasing && brushType==="flat"){ flatDab(last); return; }
+  if(!erasing && brushType==="round"){ dot(last, size*DPR); return; } // 丸筆：一定の太さ
   lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.12)*DPR; // 入り：ごく細い種点から
   dot(last, lastWidth);
 }
@@ -661,6 +663,13 @@ function move(e){
   if(penOff || !last){ resumeAt(p); return; } // 戻ってきた→同じストロークとして再開
 
   if(!erasing && brushType==="flat"){ flatStroke(last, p); last = p; return; }
+  if(!erasing && brushType==="round"){          // 丸筆：太さ一定・丸い筆
+    ctx.strokeStyle=color; ctx.lineWidth=size*DPR; ctx.lineCap="round"; ctx.lineJoin="round";
+    ctx.beginPath(); ctx.moveTo(last.x,last.y);
+    const mx=(last.x+p.x)/2, my=(last.y+p.y)/2;
+    ctx.quadraticCurveTo(last.x,last.y,mx,my); ctx.stroke();
+    last = p; return;
+  }
 
   const now = performance.now();
   const dx = p.x-last.x, dy = p.y-last.y;
@@ -694,18 +703,18 @@ function move(e){
   if(dist>0.5){ lastDir = { x:dx/dist, y:dy/dist }; }
   last = p; lastTime = now; lastWidth = w;
 }
-// 抜き：運筆方向に少しだけ延長して細める（針にならないよう先端は少し残す）
+// 抜き：運筆方向に延長して細める。やや三角気味（先端は少しだけ残す）
 function taperTail(){
   if(!last || !lastDir || lastWidth<=0.6) return;
-  const steps = 4;
-  const len = Math.min(lastWidth*0.8, size*DPR*0.5);
+  const steps = 5;
+  const len = Math.min(lastWidth*1.3, size*DPR*0.85);
   let x = last.x, y = last.y, w0 = lastWidth;
   ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for(let i=1;i<=steps;i++){
     const nx = last.x + lastDir.x*(len*i/steps);
     const ny = last.y + lastDir.y*(len*i/steps);
-    const w1 = lastWidth*(1 - 0.7*(i/steps));   // 0.3倍までで止める（鋭すぎる三角を避ける）
-    ctx.lineWidth = Math.max(0.5, (w0+w1)/2);
+    const w1 = lastWidth*(1 - 0.92*(i/steps));   // 先端は太さの約0.08倍まで（尖り気味）
+    ctx.lineWidth = Math.max(0.4, (w0+w1)/2);
     ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(nx,ny); ctx.stroke();
     x = nx; y = ny; w0 = w1;
   }
@@ -1471,15 +1480,15 @@ function initialFocus(){
   const full = visibleByRecency();
   if(!full.length) return;       // まだ無ければ何もしない（次の追加で再トライ）
   didInitialFocus = true;
+  const focusZoom = clamp(1.0 + Math.random()*(ZOOM_MAX-1.0), 1.0, ZOOM_MAX);  // 100%以上でランダム
   let list = full;
   if(window.innerWidth <= 560){  // モバイル: 下部UIに隠れる位置にしか置けない半紙は候補から外す
-    const z = clamp(1.0, zoomMin, ZOOM_MAX);
-    const ok = full.filter(([id,p])=> focusReachable(id, p, z));
+    const ok = full.filter(([id,p])=> focusReachable(id, p, focusZoom));
     if(ok.length) list = ok;     // 候補があれば絞り込み、無ければ全体から選ぶ
   }
   const [id,p] = list[Math.floor(Math.random()*list.length)];
   meguriIdx = full.findIndex(e=> e[0]===id);   // めぐりの番号は全体基準で合わせる
-  centerOnNote(id, p, 1.0);   // 開いたときは100%でフォーカス
+  centerOnNote(id, p, focusZoom);   // 開いたときは100%以上のランダム倍率でフォーカス
 }
 
 /* ---------- toast ---------- */
@@ -1509,8 +1518,8 @@ setupCanvas();
   const hi = Math.round(+sl.min + (+sl.max - +sl.min)*0.4);
   size = lo + Math.floor(Math.random()*(hi-lo+1));
   sl.value = size;
-  // 筆の種類もランダム（先細／平筆）
-  brushType = Math.random()<0.5 ? "taper" : "flat";
+  // 筆の種類もランダム（先細／丸筆／平筆）
+  brushType = ["taper","round","flat"][Math.floor(Math.random()*3)];
   document.querySelectorAll(".brush-opt").forEach(o=> o.classList.toggle("active", o.dataset.brush===brushType));
 })();
 if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Shippori Mincho"').catch(()=>{}); }
