@@ -135,7 +135,7 @@
     cursor:crosshair;
   }
 
-  .tools{margin-top:14px;flex:1 1 auto;min-height:110px;overflow-y:auto}
+  .tools{margin-top:10px;flex:1 1 auto;min-height:110px;overflow-y:auto;padding:6px 6px 0}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .swatch{
     width:30px;height:30px;border-radius:50%;
@@ -383,6 +383,7 @@
   .meguri button{
     width:36px;height:32px;border-radius:7px;border:none;cursor:pointer;
     background:#e3d7b8;color:var(--ink-faint);font-size:15px;font-weight:700;line-height:1;
+    display:flex;align-items:center;justify-content:center;padding:0;
   }
   .meguri button:hover{filter:brightness(1.05)}
   .meguri button:active{transform:scale(.96)}
@@ -503,7 +504,7 @@
         </div>
         <div class="row">
           <span class="tool-label">太さ</span>
-          <input type="range" id="size" min="4" max="44" value="14">
+          <input type="range" id="size" min="0" max="100" step="1" value="20">
         </div>
         <div class="row">
           <span class="tool-label">筆</span>
@@ -514,14 +515,13 @@
           </div>
         </div>
 
-        <input class="name-field" id="who" type="text" maxlength="16" placeholder="名前（としあき / 「」 / jun君…）">
-
         <div class="btns" style="margin-bottom:8px">
           <button class="btn-ghost" id="undo">もどす</button>
           <button class="btn-ghost" id="clear">消去</button>
           <button class="btn-ghost" id="photoBtn">写真読込</button>
         </div>
         <input type="file" id="photoInput" accept="image/*" style="display:none">
+        <input class="name-field" id="who" type="text" maxlength="16" placeholder="名前（空欄ならランダム）">
         <div class="btns">
           <button class="btn-post" id="post">貼 る</button>
         </div>
@@ -746,7 +746,23 @@ document.getElementById("colors").addEventListener("click",e=>{
   const c = sw.dataset.color;
   if(c==="ERASER"){ erasing=true; } else { erasing=false; color=c; }
 });
-document.getElementById("size").addEventListener("input",e=>{ size=+e.target.value; });
+// スライダー位置(0〜100)→筆の太さ。下9割はなめらか、上1割は極太の3段階にカチッと
+function sizeFromPos(pos){
+  if(pos <= 90) return Math.round(4 + (pos/90)*(44-4));      // 4〜44 なめらか
+  const cw = (pad.getBoundingClientRect().width) || 248;     // 描画エリア幅(CSS px)
+  const big = [Math.round(cw*0.25), Math.round(cw*0.32), Math.round(cw*0.40)]; // 25/32/40%
+  const idx = Math.min(2, Math.floor((pos-90)/(10/3)));
+  return big[idx];
+}
+document.getElementById("size").addEventListener("input",e=>{
+  let pos = +e.target.value;
+  if(pos > 90){                                              // 上1割：段の中央へ吸い付かせる（クリッキー）
+    const idx = Math.min(2, Math.floor((pos-90)/(10/3)));
+    pos = 90 + (idx+0.5)*(10/3);
+    e.target.value = pos;
+  }
+  size = sizeFromPos(pos);
+});
 document.getElementById("brushSeg").addEventListener("click",e=>{
   const b = e.target.closest(".brush-opt"); if(!b) return;
   document.querySelectorAll(".brush-opt").forEach(o=>o.classList.remove("active"));
@@ -1141,7 +1157,9 @@ postBtn.addEventListener("click", ()=>{
 });
 
 async function createPost(nx, ny){
-  const name = document.getElementById("who").value.trim().slice(0,16);
+  const RANDOM_NAMES = ["としあき","ﾄﾁｬｷ","としくん","「」","kakko","空白","jun","ぴるす","鍵最高","アージュ","雪の降る町","心理","ハデス","雨坊主","心太","ネギさま","こまち","jun君","自転車で来た","音ゲーの常連","DDRの常連"];
+  let name = document.getElementById("who").value.trim().slice(0,16);
+  if(!name) name = RANDOM_NAMES[Math.floor(Math.random()*RANDOM_NAMES.length)]; // 空欄ならランダム
   const angle = rndAngle();
   const img = pendingImg;
   const meta = { name, t: Date.now(), sou:0, del:0, hidden:false, nx, ny, angle };  // 画像は含めない
@@ -1511,13 +1529,12 @@ deskToggleBtn.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classLi
 
 /* ---------- init ---------- */
 setupCanvas();
-// デフォルトの太さをバーの1割〜4割（4〜44のうち約8〜20）でランダムに
+// デフォルトの太さをスライダーの1割〜4割の位置でランダムに
 (function(){
   const sl = document.getElementById("size");
-  const lo = Math.round(+sl.min + (+sl.max - +sl.min)*0.1);
-  const hi = Math.round(+sl.min + (+sl.max - +sl.min)*0.4);
-  size = lo + Math.floor(Math.random()*(hi-lo+1));
-  sl.value = size;
+  const pos = 10 + Math.floor(Math.random()*31);   // 位置10〜40%
+  sl.value = pos;
+  size = sizeFromPos(pos);
   // 筆の種類もランダム（先細／丸筆／平筆）
   brushType = ["taper","round","flat"][Math.floor(Math.random()*3)];
   document.querySelectorAll(".brush-opt").forEach(o=> o.classList.toggle("active", o.dataset.brush===brushType));
