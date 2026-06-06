@@ -507,10 +507,14 @@
           <button class="btn-ghost" id="undo">もどす</button>
           <button class="btn-ghost" id="clear">全消し</button>
         </div>
+        <div class="btns" style="margin-bottom:8px">
+          <button class="btn-ghost" id="photoBtn">現場のお習字を写真でのせる</button>
+        </div>
+        <input type="file" id="photoInput" accept="image/*" style="display:none">
         <div class="btns">
           <button class="btn-post" id="post">貼 る</button>
         </div>
-        <div class="hint">「貼る」を押したら、ボードで貼りたい場所をクリック。貼った後に傾きを微調整できます。</div>
+        <div class="hint">手描きでも、会場のお習字を撮った写真でもOK。「貼る」を押したら、ボードで貼りたい場所をクリック。貼った後に傾きを微調整できます。</div>
       </div>
     </div>
   </section>
@@ -692,6 +696,44 @@ document.getElementById("brushSeg").addEventListener("click",e=>{
   document.querySelectorAll(".brush-opt").forEach(o=>o.classList.remove("active"));
   b.classList.add("active");
   brushType = b.dataset.brush;
+});
+
+/* 現場のお習字を写真でのせる */
+const photoInput = document.getElementById("photoInput");
+document.getElementById("photoBtn").addEventListener("click", ()=> photoInput.click());
+function loadImgEl(file){
+  return new Promise((res,rej)=>{
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = ()=>{ URL.revokeObjectURL(url); res(img); };
+    img.onerror = (e)=>{ URL.revokeObjectURL(url); rej(e); };
+    img.src = url;
+  });
+}
+function drawPhotoCover(img){
+  const cw = pad.width, ch = pad.height;            // 半紙キャンバス（2:3）
+  const iw = img.width, ih = img.height;
+  const cr = cw/ch, ir = iw/ih;
+  let sx, sy, sw, sh;
+  if(ir > cr){ sh = ih; sw = ih*cr; sx = (iw-sw)/2; sy = 0; }   // 横長→左右を切る
+  else       { sw = iw; sh = iw/cr; sx = 0; sy = (ih-sh)/2; }   // 縦長→上下を切る
+  ctx.fillStyle = PAPER; ctx.fillRect(0,0,cw,ch);
+  ctx.drawImage(img, sx,sy,sw,sh, 0,0, cw,ch);                   // はみ出しを切って全面に
+}
+photoInput.addEventListener("change", async (e)=>{
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";                              // 同じ写真を選び直せるように
+  if(!file) return;
+  try{
+    let img;
+    try{ img = await createImageBitmap(file, {imageOrientation:"from-image"}); }  // EXIF回転を反映
+    catch(_){ img = await loadImgEl(file); }
+    pushUndo();
+    drawPhotoCover(img);
+    if(img.close) img.close();
+    toast("写真をのせました。貼る場所を選んでね");
+  }catch(err){
+    console.error(err); toast("写真を読み込めませんでした");
+  }
 });
 function doUndo(){ const s=undoStack.pop(); if(s) ctx.putImageData(s,0,0); }
 document.getElementById("undo").addEventListener("click", doUndo);
@@ -1223,14 +1265,30 @@ document.getElementById("nextNote").addEventListener("click", ()=> gotoNote(1));
 /* ---------- 起動時：貼られた半紙のどれかにランダムでフォーカス ---------- */
 let didInitialFocus = false;
 let focusTimer = null;
+// 指定ズームで寄せたとき、その半紙の中心が画面の安全な縦範囲に収まるか
+function focusReachable(id, p, z){
+  const vh = scrollEl.clientHeight;
+  const {ay} = focusAnchor();
+  const py = (clamp(nyOf(p,id),0,1)*(WALL_H-NOTE_H) + NOTE_H/2) * z;
+  const st = clamp(py - ay, 0, Math.max(0, WALL_H*z - vh));
+  const sy = py - st;                       // 画面上のY
+  const topSafe = 60;                        // ヘッダーぶん
+  const bottomSafe = vh - 150;               // 半紙めぐり／マップぶん
+  return sy >= topSafe && sy <= bottomSafe;
+}
 function initialFocus(){
   if(didInitialFocus) return;
-  const list = visibleByRecency();
-  if(!list.length) return;       // まだ無ければ何もしない（次の追加で再トライ）
+  const full = visibleByRecency();
+  if(!full.length) return;       // まだ無ければ何もしない（次の追加で再トライ）
   didInitialFocus = true;
-  const i = Math.floor(Math.random()*list.length);
-  meguriIdx = i;
-  const [id,p] = list[i];
+  let list = full;
+  if(window.innerWidth <= 560){  // モバイル: 下部UIに隠れる位置にしか置けない半紙は候補から外す
+    const z = clamp(1.0, zoomMin, ZOOM_MAX);
+    const ok = full.filter(([id,p])=> focusReachable(id, p, z));
+    if(ok.length) list = ok;     // 候補があれば絞り込み、無ければ全体から選ぶ
+  }
+  const [id,p] = list[Math.floor(Math.random()*list.length)];
+  meguriIdx = full.findIndex(e=> e[0]===id);   // めぐりの番号は全体基準で合わせる
   centerOnNote(id, p, 1.0);   // 開いたときは100%でフォーカス
 }
 
