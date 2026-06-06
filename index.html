@@ -81,6 +81,8 @@
   .float-desk{
     position:absolute;top:78px;left:18px;z-index:20;
     width:330px;max-width:calc(100vw - 36px);
+    max-height:calc(100dvh - 96px);
+    display:flex;flex-direction:column;
     background:linear-gradient(150deg,#efe6cf,#e5d7b4);
     border-radius:14px;
     box-shadow:0 14px 34px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.4);
@@ -88,7 +90,7 @@
   }
   .desk-bar{
     display:flex;align-items:center;justify-content:space-between;gap:8px;
-    padding:10px 12px 8px;
+    padding:10px 12px 8px;flex:0 0 auto;
   }
   .desk-bar-title{
     font-family:"Shippori Mincho",serif;font-weight:700;font-size:14px;
@@ -102,11 +104,11 @@
     display:flex;align-items:center;justify-content:center;padding:0;
   }
   .desk-toggle:hover{filter:brightness(1.04)}
-  .desk-body{padding:0 16px 16px}
+  .desk-body{padding:0 16px 16px;overflow-y:auto;min-height:0;flex:1 1 auto;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
   .float-desk.collapsed .desk-body{display:none}
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
   @media(max-width:560px){
-    .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:70px}
+    .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:70px;max-height:calc(100dvh - 80px)}
     .float-tools .zoom-ctl{display:none}
     .float-tools{padding:7px 11px}
   }
@@ -116,6 +118,7 @@
     border-radius:6px;
     box-shadow:inset 0 0 0 1px var(--paper-edge), inset 0 0 22px rgba(150,120,70,.18);
     position:relative;
+    flex:0 0 auto;
   }
   /* 8 x 12 cm => 2 : 3 */
   .canvas-frame::before{
@@ -131,7 +134,7 @@
     cursor:crosshair;
   }
 
-  .tools{margin-top:14px}
+  .tools{margin-top:14px;flex:1 1 auto;min-height:110px;overflow-y:auto}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .swatch{
     width:30px;height:30px;border-radius:50%;
@@ -520,7 +523,7 @@
         <div class="btns">
           <button class="btn-post" id="post">貼 る</button>
         </div>
-        <div class="hint">手描きでも、会場のお習字を撮った写真でもOK。「貼る」を押したら、ボードで貼りたい場所をクリック。貼った後に傾きを微調整できます。</div>
+        <div class="hint">会場のお習字撮影は自分のもの限定。会場では撮影登録が必要です。</div>
       </div>
     </div>
   </section>
@@ -592,6 +595,8 @@ let drawing = false;
 let last = null;
 let lastTime = 0;
 let lastWidth = 0;
+let lastDir = null;   // 直近の運筆方向（抜きの三角テールに使う）
+let penOff = false;   // 描画中にカーソルが描画エリア外に出ているか
 let undoStack = [];
 
 function setupCanvas(){
@@ -619,9 +624,9 @@ function pushUndo(){
 }
 function start(e){
   e.preventDefault(); pushUndo();
-  drawing = true; last = pos(e); lastTime = performance.now();
+  drawing = true; last = pos(e); lastTime = performance.now(); lastDir = null; penOff = false;
   if(!erasing && brushType==="flat"){ flatDab(last); return; }
-  lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.35)*DPR; // 入り：細く始まる
+  lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.16)*DPR; // 入り：かなり細く始める
   dot(last, lastWidth);
 }
 function flatNib(){ const h=size/2*DPR; return { nx:Math.cos(NIB)*h, ny:Math.sin(NIB)*h }; }
@@ -639,9 +644,18 @@ function flatSeg(a,b){
   ctx.closePath(); ctx.fill();
   flatDab(b); // 先端のニブで継ぎ目をなめらかに
 }
+function resumeAt(p){            // エリアに戻った／描き始め：継ぎ目なく再開（線でつながない）
+  penOff = false;
+  last = p; lastTime = performance.now(); lastDir = null;
+  if(!erasing && brushType==="flat"){ flatDab(p); }
+  else { lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.16)*DPR; dot(p, lastWidth); }
+}
 function move(e){
   if(!drawing) return; e.preventDefault();
   const p = pos(e);
+  const inside = p.x>=0 && p.x<=pad.width && p.y>=0 && p.y<=pad.height;
+  if(!inside){ penOff = true; return; }     // 外：描かない・ストロークも終わらせない
+  if(penOff || !last){ resumeAt(p); return; } // 戻ってきた→同じストロークとして再開
 
   if(!erasing && brushType==="flat"){ flatSeg(last, p); last = p; return; }
 
@@ -656,22 +670,40 @@ function move(e){
   } else {
     const base = size*DPR;
     const speed = dist/dt;                 // px/ms
-    // 速いほど細く、ゆっくりだと太く（筆の入り抜き）
-    const f = Math.max(0.22, Math.min(1.35, 1.35 - speed*0.5));
+    // 速いほど細く、ゆっくりだと太く。コントラストを強めて三角形っぽく
+    const f = Math.max(0.06, Math.min(1.7, 1.7 - speed*0.7));
     targetW = base*f;
   }
   // なめらかに太さを変化させる
-  const w = erasing ? targetW : lastWidth + (targetW-lastWidth)*0.4;
+  const w = erasing ? targetW : lastWidth + (targetW-lastWidth)*0.35;
 
   ctx.strokeStyle = erasing ? PAPER : color;
   ctx.lineWidth = w;
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.beginPath();
   ctx.moveTo(last.x,last.y);
   const mx=(last.x+p.x)/2, my=(last.y+p.y)/2;
   ctx.quadraticCurveTo(last.x,last.y,mx,my);
   ctx.stroke();
 
+  if(dist>0.5){ lastDir = { x:dx/dist, y:dy/dist }; }
   last = p; lastTime = now; lastWidth = w;
+}
+// 抜き：運筆方向に少し延長しながら0へ細める（三角の先端）
+function taperTail(){
+  if(!last || !lastDir || lastWidth<=0.5) return;
+  const steps = 6;
+  const len = Math.min(lastWidth*2.4, size*DPR*1.6);
+  let x = last.x, y = last.y, w0 = lastWidth;
+  ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
+  for(let i=1;i<=steps;i++){
+    const nx = last.x + lastDir.x*(len*i/steps);
+    const ny = last.y + lastDir.y*(len*i/steps);
+    const w1 = lastWidth*(1 - i/steps);
+    ctx.lineWidth = Math.max(0.4, (w0+w1)/2);
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(nx,ny); ctx.stroke();
+    x = nx; y = ny; w0 = w1;
+  }
 }
 function dot(p,w){
   ctx.fillStyle = erasing ? PAPER : color;
@@ -679,14 +711,18 @@ function dot(p,w){
   ctx.arc(p.x,p.y,(w||(erasing?size*2:size)*DPR)/2,0,Math.PI*2);
   ctx.fill();
 }
-function end(){ drawing=false; last=null; }
+function end(){
+  if(drawing && !erasing && brushType==="taper") taperTail();
+  drawing=false; last=null; lastDir=null;
+}
 
 pad.addEventListener("mousedown",start);
-pad.addEventListener("mousemove",move);
+window.addEventListener("mousemove",move);
 window.addEventListener("mouseup",end);
 pad.addEventListener("touchstart",start,{passive:false});
-pad.addEventListener("touchmove",move,{passive:false});
-pad.addEventListener("touchend",end);
+window.addEventListener("touchmove",move,{passive:false});
+window.addEventListener("touchend",end);
+window.addEventListener("touchcancel",end);
 
 /* color picker */
 document.getElementById("colors").addEventListener("click",e=>{
@@ -814,6 +850,13 @@ let placing = false;        // 位置決め中
 let pendingImg = null;      // 貼る予定の画像
 let editingId = null;       // 角度微調整中の自分の投稿
 const renderedIds = new Set(); // 既に表示済みの半紙（登場アニメの再生抑制用）
+let zCounter = 100;
+const zOverride = new Map();    // id -> z（クリックで上げた半紙）
+function raiseNote(id){
+  zCounter++; zOverride.set(id, zCounter);
+  const el = notesEl.querySelector('.note[data-id="'+id+'"]');
+  if(el) el.style.zIndex = zCounter;
+}
 
 /* ---------- 画像キャッシュ（メモリ + IndexedDB） ---------- */
 const imgCache = new Map();   // id -> dataURL（このセッション）
@@ -937,8 +980,9 @@ function render(){
         ${ p.hidden ? `<button class="mini restore" onclick="adminRestore('${p.id}')">復活</button>` : '' }
         <button class="mini del" onclick="adminDelete('${p.id}')">削除</button>
       </div>` : '';
+    const zr = zOverride.has(p.id) ? `;z-index:${zOverride.get(p.id)}` : "";
     return `
-    <div class="note${mine}${fresh} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)">
+    <div class="note${mine}${fresh} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)${zr}">
       <span class="tape" style="--r:${tapeColor()}deg"></span>
       <div class="imgwrap">${hiddenBadge}${imgHtml}</div>
       <div class="who">${esc(p.name)||"としあき"}</div>
@@ -1008,6 +1052,41 @@ function wallCoords(clientX, clientY){
   const y = clamp((clientY - r.top)/zoom - 10,        0, WALL_H-NOTE_H);
   return {x, y};
 }
+/* 重なり制御：下の半紙の画像部分が最低2割は露出する位置へずらす（ズレはランダム） */
+function noteImgRect(x,y){ const m=6, w=NOTE_W-2*m; return {x:x+m, y:y+m, w, h:w*1.5}; }
+function rectInter(a,b){
+  const ix = Math.max(0, Math.min(a.x+a.w,b.x+b.w) - Math.max(a.x,b.x));
+  const iy = Math.max(0, Math.min(a.y+a.h,b.y+b.h) - Math.max(a.y,b.y));
+  return ix*iy;
+}
+function worstCover(x,y){
+  const nr = {x, y, w:NOTE_W, h:NOTE_H};   // 新しい半紙が覆う全体の矩形
+  let worst = 0;
+  posts.forEach((p,id)=>{
+    if(p.hidden && !admin) return;
+    const ex = clamp(nxOf(p,id),0,1)*(WALL_W-NOTE_W);
+    const ey = clamp(nyOf(p,id),0,1)*(WALL_H-NOTE_H);
+    const ir = noteImgRect(ex,ey);
+    const cov = rectInter(nr, ir)/(ir.w*ir.h);   // 下の画像がどれだけ隠れるか
+    if(cov>worst) worst = cov;
+  });
+  return worst;
+}
+function adjustPlacement(x,y){
+  if(worstCover(x,y) <= 0.8) return {x,y};       // 2割以上見えていればOK
+  let best={x,y}, bestCov=worstCover(x,y);
+  for(const r of [28,44,64,90,120,150,190]){
+    for(let k=0;k<12;k++){
+      const a = Math.random()*Math.PI*2;
+      const cx = clamp(x+Math.cos(a)*r, 0, WALL_W-NOTE_W);
+      const cy = clamp(y+Math.sin(a)*r, 0, WALL_H-NOTE_H);
+      const c = worstCover(cx,cy);
+      if(c<=0.8) return {x:cx, y:cy};
+      if(c<bestCov){ bestCov=c; best={x:cx,y:cy}; }
+    }
+  }
+  return best;   // 完全には避けられないときは一番マシな位置
+}
 wallEl.addEventListener("pointermove", e=>{
   if(!placing) return;
   const {x,y} = wallCoords(e.clientX, e.clientY);
@@ -1015,10 +1094,17 @@ wallEl.addEventListener("pointermove", e=>{
 });
 wallEl.addEventListener("click", async e=>{
   if(!placing) return;
-  const {x,y} = wallCoords(e.clientX, e.clientY);
+  let {x,y} = wallCoords(e.clientX, e.clientY);
+  ({x,y} = adjustPlacement(x,y));                // 重なりすぎなら少しずらす
   const nx = (WALL_W-NOTE_W) ? x/(WALL_W-NOTE_W) : 0;
   const ny = (WALL_H-NOTE_H) ? y/(WALL_H-NOTE_H) : 0;
   await createPost(nx, ny);
+});
+// 重なった半紙：クリック／タップで上に出して下のものを確認できる
+notesEl.addEventListener("click", e=>{
+  if(placing) return;
+  const note = e.target.closest(".note"); if(!note) return;
+  raiseNote(note.dataset.id);
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape" && placing) cancelPlacing(); });
 document.addEventListener("keydown", e=>{
@@ -1343,6 +1429,7 @@ function centerOnNote(id, p, targetZoom){
   scrollEl.scrollLeft = clamp(px - ax, 0, Math.max(0, WALL_W*zoom - scrollEl.clientWidth));
   scrollEl.scrollTop  = clamp(py - ay, 0, Math.max(0, WALL_H*zoom - scrollEl.clientHeight));
   drawMinimap();
+  raiseNote(id);   // フォーカス対象を最前面に（下になっていても見えるように）
   requestAnimationFrame(()=>{
     const el = notesEl.querySelector('.note[data-id="'+id+'"]');
     if(el){ el.classList.remove("found"); void el.offsetWidth; el.classList.add("found"); }
@@ -1408,6 +1495,14 @@ deskToggleBtn.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classLi
 
 /* ---------- init ---------- */
 setupCanvas();
+// デフォルトの太さをバーの1割〜4割（4〜44のうち約8〜20）でランダムに
+(function(){
+  const sl = document.getElementById("size");
+  const lo = Math.round(+sl.min + (+sl.max - +sl.min)*0.1);
+  const hi = Math.round(+sl.min + (+sl.max - +sl.min)*0.4);
+  size = lo + Math.floor(Math.random()*(hi-lo+1));
+  sl.value = size;
+})();
 if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Shippori Mincho"').catch(()=>{}); }
 computeZoomMin();
 applyZoom();
