@@ -155,6 +155,10 @@
   .brush-opt.active{background:var(--shu);color:var(--paper)}
   .brush-opt:not(.active):hover{background:rgba(181,52,31,.1)}
   input[type=range]{flex:1;accent-color:var(--sumi)}
+  .size-wrap{flex:1;display:flex;flex-direction:column;gap:1px}
+  .size-wrap input[type=range]{flex:none;width:100%}
+  .size-dots{position:relative;height:7px}
+  .size-dots i{position:absolute;top:1px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--sumi);opacity:.75}
 
   .name-field{
     width:100%;
@@ -504,7 +508,10 @@
         </div>
         <div class="row">
           <span class="tool-label">太さ</span>
-          <input type="range" id="size" min="0" max="100" step="1" value="20">
+          <div class="size-wrap">
+            <div class="size-dots"><i style="left:calc(8px + 0.625*(100% - 16px))"></i><i style="left:calc(8px + 0.75*(100% - 16px))"></i><i style="left:calc(8px + 0.875*(100% - 16px))"></i><i style="left:calc(100% - 8px)"></i></div>
+            <input type="range" id="size" min="0" max="100" step="1" value="20">
+          </div>
         </div>
         <div class="row">
           <span class="tool-label">筆</span>
@@ -674,22 +681,19 @@ function move(e){
   const now = performance.now();
   const dx = p.x-last.x, dy = p.y-last.y;
   const dist = Math.hypot(dx,dy);
-  const dt = Math.max(1, now-lastTime);
 
   let targetW;
   if(erasing){
     targetW = size*2*DPR;
   } else {
+    // 先細：入りは細い点から、開始距離に応じて本体の太さまで立ち上げる（速度には依存しない）
     const base = size*DPR;
     strokeLen += dist;
-    const speed = dist/dt;                          // px/ms
-    const f = Math.max(0.2, Math.min(1.5, 1.5 - speed*0.6));  // 速いほど細く
-    const head = Math.min(1, strokeLen/(base*1.8)); // 入り：開始からの距離で徐々に太く（筆圧風）
-    const headMul = 0.12 + 0.88*head;
-    targetW = base * f * headMul;
+    const head = Math.min(1, strokeLen/(base*2.0));   // base*2pxかけて 0.08→1.0
+    targetW = base * (0.08 + 0.92*head);
   }
   // なめらかに太さを変化させる
-  const w = erasing ? targetW : lastWidth + (targetW-lastWidth)*0.35;
+  const w = erasing ? targetW : lastWidth + (targetW-lastWidth)*0.5;
 
   ctx.strokeStyle = erasing ? PAPER : color;
   ctx.lineWidth = w;
@@ -703,18 +707,18 @@ function move(e){
   if(dist>0.5){ lastDir = { x:dx/dist, y:dy/dist }; }
   last = p; lastTime = now; lastWidth = w;
 }
-// 抜き：運筆方向に延長して細める。やや三角気味（先端は少しだけ残す）
+// 抜き：運筆方向へ延長して0へ細める（先端を点にする）
 function taperTail(){
   if(!last || !lastDir || lastWidth<=0.6) return;
-  const steps = 5;
-  const len = Math.min(lastWidth*1.3, size*DPR*0.85);
+  const steps = 6;
+  const len = Math.min(lastWidth*1.6, size*DPR*1.4);
   let x = last.x, y = last.y, w0 = lastWidth;
   ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for(let i=1;i<=steps;i++){
     const nx = last.x + lastDir.x*(len*i/steps);
     const ny = last.y + lastDir.y*(len*i/steps);
-    const w1 = lastWidth*(1 - 0.92*(i/steps));   // 先端は太さの約0.08倍まで（尖り気味）
-    ctx.lineWidth = Math.max(0.4, (w0+w1)/2);
+    const w1 = lastWidth*(1 - i/steps);   // 先端まで0へ
+    ctx.lineWidth = Math.max(0.3, (w0+w1)/2);
     ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(nx,ny); ctx.stroke();
     x = nx; y = ny; w0 = w1;
   }
@@ -746,19 +750,23 @@ document.getElementById("colors").addEventListener("click",e=>{
   const c = sw.dataset.color;
   if(c==="ERASER"){ erasing=true; } else { erasing=false; color=c; }
 });
-// スライダー位置(0〜100)→筆の太さ。下9割はなめらか、上1割は極太の3段階にカチッと
+// スライダー位置(0〜100)→筆の太さ。下5割はなめらか、上5割は極太の4段にカチッと吸い付く
+const SIZE_DETENTS = [62.5, 75, 87.5, 100];        // 上半分の段（最後は端）
+function nearestDetentIdx(pos){
+  let idx=0, best=1e9;
+  for(let i=0;i<SIZE_DETENTS.length;i++){ const d=Math.abs(pos-SIZE_DETENTS[i]); if(d<best){best=d;idx=i;} }
+  return idx;
+}
 function sizeFromPos(pos){
-  if(pos <= 90) return Math.round(4 + (pos/90)*(44-4));      // 4〜44 なめらか
+  if(pos <= 50) return Math.round(4 + (pos/50)*(44-4));      // 4〜44 なめらか
   const cw = (pad.getBoundingClientRect().width) || 248;     // 描画エリア幅(CSS px)
-  const big = [Math.round(cw*0.25), Math.round(cw*0.32), Math.round(cw*0.40)]; // 25/32/40%
-  const idx = Math.min(2, Math.floor((pos-90)/(10/3)));
-  return big[idx];
+  const big = [0.22,0.28,0.34,0.40].map(r=> Math.round(cw*r)); // 22/28/34/40%
+  return big[nearestDetentIdx(pos)];
 }
 document.getElementById("size").addEventListener("input",e=>{
   let pos = +e.target.value;
-  if(pos > 90){                                              // 上1割：段の中央へ吸い付かせる（クリッキー）
-    const idx = Math.min(2, Math.floor((pos-90)/(10/3)));
-    pos = 90 + (idx+0.5)*(10/3);
+  if(pos > 50){                                              // 上半分：段にカチッと吸い付かせる
+    pos = SIZE_DETENTS[nearestDetentIdx(pos)];
     e.target.value = pos;
   }
   size = sizeFromPos(pos);
