@@ -770,7 +770,7 @@ function exportImage(){
   o.drawImage(pad,0,0,220,330);
   const side = 62, margin = 14;
   drawSeal(o, 220-margin-side, 330-margin-side, side);
-  return out.toDataURL("image/png");
+  return out.toDataURL("image/jpeg", 0.72);   // PNG→JPEGで容量を大幅削減（特に写真）
 }
 function isBlank(){
   // sample a downscale and check variance vs paper
