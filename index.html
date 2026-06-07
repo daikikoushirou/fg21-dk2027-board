@@ -1510,15 +1510,19 @@ function closeRotor(){
   if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }   // テープが生えてくる
   rotorId = null; editingId = null; rotorDragging = false;
 }
-function cancelRotor(){                         // 位置決めをやめる＝最初の角度に戻して閉じる
+function cancelRotor(){                         // 位置決めをやめる＝貼るのを取りやめ（半紙を消す）
   if(!rotorEl.classList.contains("show")) return;
+  const id = rotorId;
   rotorDragging = false;
-  rotorAngle = rotorInitAngle;
-  applyRotor(true);
   rotorEl.classList.remove("show");
-  const el = rotorNoteEl();
-  if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }
   rotorId = null; editingId = null;
+  if(!id) return;
+  // 貼った直後の半紙を取り消す（自分・他者の画面から消す）
+  posts.delete(id); imgCache.delete(id); imgState.delete(id); idbDel(id);
+  zOverride.delete(id);
+  if(activeNoteId === id) activeNoteId = null;
+  render();
+  if(db){ remove(ref(db, "posts/"+id)).catch(()=>{}); remove(ref(db, "imgs/"+id)).catch(()=>{}); }
 }
 rotorEl.addEventListener("pointerdown", e=>{
   if(e.target.closest("#rotorCancel")){ e.preventDefault(); e.stopPropagation(); cancelRotor(); return; }  // やめる
