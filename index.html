@@ -1696,6 +1696,7 @@ function computeZoomMin(){
 }
 // anchorClientX/Y を指定すると、その画面位置の指す壁の点を固定したままズーム
 function zoomTo(z, anchorClientX, anchorClientY){
+  const prev = zoom;
   z = clamp(Math.round(z*100)/100, zoomMin, ZOOM_MAX);
   if(z === zoom){ applyZoom(); return; }
   const r = scrollEl.getBoundingClientRect();
@@ -1707,6 +1708,16 @@ function zoomTo(z, anchorClientX, anchorClientY){
   applyZoom();
   scrollEl.scrollLeft = clamp(natX*zoom - ax, 0, Math.max(0, WALL_W*zoom - scrollEl.clientWidth));
   scrollEl.scrollTop  = clamp(natY*zoom - ay, 0, Math.max(0, WALL_H*zoom - scrollEl.clientHeight));
+  notifyZoomedOut(prev);
+}
+let lastZoomOutNote = 0;
+function notifyZoomedOut(prev){
+  // 半紙が小さすぎて画像読み込みを保留する領域（NOTE_W*zoom<56）に、引きで入った瞬間だけ案内
+  if(!didInitialFocus) return;
+  if(NOTE_W*zoom < 56 && NOTE_W*prev >= 56 && Date.now()-lastZoomOutNote > 6000){
+    lastZoomOutNote = Date.now();
+    toast("もっともズームアウトした状態では個別の半紙が読み込まれないことがあります。少しだけズームインしてみてね。");
+  }
 }
 document.getElementById("zoomRange").addEventListener("input", e=> zoomTo(+e.target.value));
 document.getElementById("zoomIn").addEventListener("click", ()=> zoomTo(zoom+0.1));
