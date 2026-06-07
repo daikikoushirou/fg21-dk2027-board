@@ -325,6 +325,9 @@
   }
   /* 反転（180°）した半紙はテープを反対の端へ＝画面上では上側に来る */
   .note.flipped .tape{top:auto;bottom:-9px}
+  .note .tape{transition:opacity .3s ease, transform .4s cubic-bezier(.2,.85,.3,1.45)}
+  .note.rotoring .tape{opacity:0;transform:translateX(-50%) rotate(var(--r,-3deg)) scale(.2)}  /* 回転中は隠し、確定後に生える */
+  .note.snapping{transition:transform .3s cubic-bezier(.25,.9,.35,1.2)}                          /* ぐるん／落ち着き */
   .note .who{
     font-size:10px;color:var(--ink-faint);
     text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -1160,6 +1163,7 @@ function render(){
     const delCls = delDone.has(p.id) ? "del-btn done" : "del-btn";
     const hiddenBadge = p.hidden ? '<span class="hidden-badge">非表示</span>' : '';
     const mine = (p.id===editingId) ? " mine" : "";
+    const rotoring = mine ? " rotoring" : "";   // 回転中はテープを隠す（確定後に生える）
     const fresh = !renderedIds.has(p.id) ? "" : " no-anim";  // 既存はアニメ無し（ビクつき防止）
     const adminLine = admin ? `
       <div class="admin-line">
@@ -1171,7 +1175,7 @@ function render(){
       </div>` : '';
     const zr = zOverride.has(p.id) ? `;z-index:${zOverride.get(p.id)}` : "";
     return `
-    <div class="note${mine}${fresh}${flippedCls} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)${zr}">
+    <div class="note${mine}${rotoring}${fresh}${flippedCls} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)${zr}">
       <span class="tape" style="--r:${tapeColor()}deg"></span>
       <div class="imgwrap">${hiddenBadge}${imgHtml}</div>
       <div class="who">${esc(p.name)||"としあき"}</div>
@@ -1404,11 +1408,10 @@ document.addEventListener("pointerdown", e=>{
   if(angleBar.classList.contains("show") && (Date.now()-angleOpenedAt > 400) && !angleBar.contains(e.target)) closeAngle();
 });
 
-/* ---------- PC: 弧型の回転スライダー（±20°）＋ 上下反転 ---------- */
+/* ---------- PC: 円形ダイヤルで回転（静止は±20°）。横を越えて引き回すと反対側へ「ぐるん」 ---------- */
 const rotorEl = document.getElementById("rotor");
-let rotorId = null, rotorR = 0, rotorOpenedAt = 0, rotorDragging = false;
-let rotorTilt = 0, rotorFlipped = false;     // 傾き(±20)と反転(180°)を分けて保持
-const ROTOR_MAX = 20;                        // 傾きの上限（左右20°）
+let rotorId = null, rotorR = 0, rotorArc = 0, rotorAngle = 0, rotorOpenedAt = 0, rotorDragging = false;
+const ROTOR_MAX = 20;                        // 静止時の傾き上限（上向き・反転とも±20°）
 function rotorCenter(){
   const p = posts.get(rotorId); if(!p) return null;
   const r = wallEl.getBoundingClientRect();  // 拡縮・スクロール済みの矩形
@@ -1417,63 +1420,73 @@ function rotorCenter(){
     cy: r.top  + (clamp(nyOf(p,rotorId),0,1)*(WALL_H-NOTE_H) + NOTE_H/2)*zoom
   };
 }
-function rotorPoint(angle, R, Rt){           // 傾き→ハンドル座標（真下=0、左で＋）
+function rotorPoint(angle, C, Rr){           // 角度→ダイヤル上の座標（真下=0、左で＋）
   const rad = angle*Math.PI/180;
-  return { x:(R - Math.sin(rad)*Rt), y:(R + Math.cos(rad)*Rt) };
+  return { x:(C - Math.sin(rad)*Rr), y:(C + Math.cos(rad)*Rr) };
+}
+function rotorArcPts(from, to, C, Rr){
+  let s = ""; for(let t=from;t<=to;t+=1){ const q=rotorPoint(t,C,Rr); s += q.x.toFixed(1)+","+q.y.toFixed(1)+" "; } return s.trim();
 }
 function buildRotor(){
-  const R = NOTE_H*zoom*0.5 + 42; rotorR = R;
-  const Rt = R - 12;
-  let pts = [];
-  for(let t=-ROTOR_MAX;t<=ROTOR_MAX;t+=1){ const q=rotorPoint(t,R,Rt); pts.push(q.x.toFixed(1)+","+q.y.toFixed(1)); }
-  const h = rotorPoint(rotorTilt,R,Rt);
+  const Rarc = NOTE_H*zoom*0.5 + 42;          // ダイヤル半径
+  const PAD = 52;                             // 当たり判定の余白
+  const R = Rarc + PAD; rotorR = R; rotorArc = Rarc;
+  const h = rotorPoint(rotorAngle, R, Rarc);
   rotorEl.style.width = rotorEl.style.height = (2*R)+"px";
   rotorEl.innerHTML =
     `<svg width="${2*R}" height="${2*R}" viewBox="0 0 ${2*R} ${2*R}">`+
-    `<polyline points="${pts.join(' ')}" fill="none" stroke="rgba(181,52,31,.45)" stroke-width="3" stroke-linecap="round"/>`+
+    `<circle cx="${R}" cy="${R}" r="${Rarc}" fill="none" stroke="rgba(181,52,31,.16)" stroke-width="2"/>`+
+    `<polyline points="${rotorArcPts(-ROTOR_MAX,ROTOR_MAX,R,Rarc)}" fill="none" stroke="rgba(181,52,31,.5)" stroke-width="3" stroke-linecap="round"/>`+
+    `<polyline points="${rotorArcPts(180-ROTOR_MAX,180+ROTOR_MAX,R,Rarc)}" fill="none" stroke="rgba(181,52,31,.5)" stroke-width="3" stroke-linecap="round"/>`+
     `<line id="rotorStem" x1="${R}" y1="${R}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}" stroke="rgba(181,52,31,.35)" stroke-width="2"/>`+
     `<circle cx="${R}" cy="${R}" r="3" fill="rgba(181,52,31,.6)"/>`+
-    `<circle id="rotorHandle" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="10" fill="#b5341f" stroke="#fff" stroke-width="2.5"/>`+
-    `</svg>`+
-    `<button class="rotor-flip${rotorFlipped?' active':''}" id="rotorFlip" title="上下反転">⇅ 反転</button>`;
+    `<circle id="rotorHandle" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="13" fill="#b5341f" stroke="#fff" stroke-width="3"/>`+
+    `</svg>`;
 }
 function positionRotor(){
   const c = rotorCenter(); if(!c) return;
   rotorEl.style.left = (c.cx - rotorR) + "px";
   rotorEl.style.top  = (c.cy - rotorR) + "px";
 }
-function applyRotor(write){
-  const eff = rotorTilt + (rotorFlipped ? 180 : 0);   // 実際の回転角
-  const p = posts.get(rotorId); if(p) p.angle = eff;
-  setNoteTransform(rotorId, eff);
-  const el = rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null;
-  if(el) el.classList.toggle("flipped", rotorFlipped);  // テープ位置を反転に追従
-  const h = rotorPoint(rotorTilt, rotorR, rotorR-12);
+function rotorNoteEl(){ return rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null; }
+function moveHandle(){
+  const h = rotorPoint(rotorAngle, rotorR, rotorArc);
   const hd = rotorEl.querySelector("#rotorHandle"), st = rotorEl.querySelector("#rotorStem");
   if(hd){ hd.setAttribute("cx", h.x.toFixed(1)); hd.setAttribute("cy", h.y.toFixed(1)); }
   if(st){ st.setAttribute("x2", h.x.toFixed(1)); st.setAttribute("y2", h.y.toFixed(1)); }
-  if(write && db) update(ref(db, "posts/"+rotorId), { angle:eff }).catch(()=>{});
 }
-function rotorSetTilt(tilt, write){
-  rotorTilt = clamp(Math.round(tilt), -ROTOR_MAX, ROTOR_MAX);
-  applyRotor(write);
+function applyRotor(write){
+  const p = posts.get(rotorId); if(p) p.angle = rotorAngle;
+  setNoteTransform(rotorId, rotorAngle);
+  moveHandle();
+  if(write && db) update(ref(db, "posts/"+rotorId), { angle:rotorAngle }).catch(()=>{});
 }
-function toggleFlip(){
-  rotorFlipped = !rotorFlipped;
-  const b = rotorEl.querySelector("#rotorFlip"); if(b) b.classList.toggle("active", rotorFlipped);
-  applyRotor(true);
+// いちばん近い静止角（上向き0±20 か 反転180±20）。巻き数を保つので戻り回転が最短
+function snapAngle(a){
+  const anchor = Math.round(a/180)*180;
+  return anchor + clamp(Math.round(a-anchor), -ROTOR_MAX, ROTOR_MAX);
 }
 function angleFromPointer(e){
   const c = rotorCenter(); if(!c) return 0;
   const dx = e.clientX - c.cx, dy = e.clientY - c.cy;
   return Math.atan2(-dx, dy) * 180/Math.PI;   // 真下=0、左へ回すと＋
 }
+function rotorDrag(e){
+  let raw = angleFromPointer(e);
+  while(raw - rotorAngle >  180) raw -= 360;  // 連続化（巻き戻り防止）
+  while(raw - rotorAngle < -180) raw += 360;
+  rotorAngle = raw;
+  applyRotor(false);                          // ドラッグ中は指の角度にそのまま追従（DB書き込み無し）
+}
+function rotorRelease(){
+  rotorAngle = snapAngle(rotorAngle);         // 上向き／反転の±20°に落ち着く
+  const el = rotorNoteEl();
+  if(el){ el.classList.add("snapping"); setTimeout(()=>el.classList.remove("snapping"), 320); }  // ぐるん／settle
+  applyRotor(true);
+}
 function openRotor(id, angle){
   rotorId = id;
-  let a = ((angle%360)+360)%360;               // 0..360
-  rotorFlipped = (a>90 && a<270);
-  let tilt = rotorFlipped ? a-180 : (a>180 ? a-360 : a);
-  rotorTilt = clamp(Math.round(tilt), -ROTOR_MAX, ROTOR_MAX);
+  rotorAngle = snapAngle(angle);
   buildRotor();
   positionRotor();
   rotorEl.classList.add("show");
@@ -1481,18 +1494,15 @@ function openRotor(id, angle){
 }
 function closeRotor(){
   if(!rotorEl.classList.contains("show")) return;
-  applyRotor(true);                            // 最終状態を保存
+  rotorRelease();                              // 最終状態にスナップして保存
   rotorEl.classList.remove("show");
-  const el = rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null;
-  if(el) el.classList.remove("mine");
+  const el = rotorNoteEl();
+  if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }   // テープが生えてくる
   rotorId = null; editingId = null; rotorDragging = false;
 }
-rotorEl.addEventListener("pointerdown", e=>{
-  if(e.target.closest("#rotorFlip")){ e.preventDefault(); e.stopPropagation(); toggleFlip(); return; }  // 反転ボタン
-  e.preventDefault(); rotorDragging = true; rotorSetTilt(angleFromPointer(e), false);
-});
-window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorSetTilt(angleFromPointer(e), false); });
-window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; rotorSetTilt(rotorTilt, true); } });
+rotorEl.addEventListener("pointerdown", e=>{ e.preventDefault(); rotorDragging = true; rotorDrag(e); });
+window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorDrag(e); });
+window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; rotorRelease(); } });
 // 外側をクリックで確定（開いた直後の一瞬は無視）
 document.addEventListener("pointerdown", e=>{
   if(rotorEl.classList.contains("show") && (Date.now()-rotorOpenedAt > 400) && !rotorEl.contains(e.target)) closeRotor();
