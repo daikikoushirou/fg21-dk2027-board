@@ -574,8 +574,11 @@
         <div class="row">
           <span class="tool-label">太さ</span>
           <div class="size-wrap">
-            <div class="size-dots"><i style="left:calc(8px + 0.625*(100% - 16px))"></i><i style="left:calc(8px + 0.75*(100% - 16px))"></i><i style="left:calc(8px + 0.875*(100% - 16px))"></i><i style="left:calc(100% - 8px)"></i></div>
-            <input type="range" id="size" min="0" max="100" step="1" value="20">
+            <div class="size-dots">
+              <i style="left:calc(8px + 0.0000*(100% - 16px))"></i><i style="left:calc(8px + 0.0909*(100% - 16px))"></i><i style="left:calc(8px + 0.1818*(100% - 16px))"></i><i style="left:calc(8px + 0.2727*(100% - 16px))"></i><i style="left:calc(8px + 0.3636*(100% - 16px))"></i><i style="left:calc(8px + 0.4545*(100% - 16px))"></i><i style="left:calc(8px + 0.5455*(100% - 16px))"></i><i style="left:calc(8px + 0.6364*(100% - 16px))"></i><i style="left:calc(8px + 0.7273*(100% - 16px))"></i><i style="left:calc(8px + 0.8182*(100% - 16px))"></i><i style="left:calc(8px + 0.9091*(100% - 16px))"></i><i style="left:calc(100% - 8px)"></i>
+            </div>
+            <input type="range" id="size" min="0" max="11" step="1" value="2">
+
           </div>
         </div>
         <div class="row">
@@ -903,27 +906,20 @@ document.getElementById("colors").addEventListener("click",e=>{
   const c = sw.dataset.color;
   if(c==="ERASER"){ erasing=true; } else { erasing=false; color=c; }
 });
-// スライダー位置(0〜100)→筆の太さ。下5割はなめらか、上5割は極太の4段にカチッと吸い付く
-const SIZE_DETENTS = [62.5, 75, 87.5, 100];        // 上半分の段（最後は端）
-function nearestDetentIdx(pos){
-  let idx=0, best=1e9;
-  for(let i=0;i<SIZE_DETENTS.length;i++){ const d=Math.abs(pos-SIZE_DETENTS[i]); if(d<best){best=d;idx=i;} }
-  return idx;
-}
-function sizeFromPos(pos){
-  if(pos <= 50) return Math.round(4 + (pos/50)*(44-4));      // 4〜44 なめらか
+// 太さは全段クリッキーな12段。位置(0〜11)→筆の太さ。最細は2px、最太は描画幅の約40%
+const SIZE_STEPS = 12;
+function sizeFromPos(i){
+  i = Math.max(0, Math.min(SIZE_STEPS-1, Math.round(i)));
   const cw = (pad.getBoundingClientRect().width) || 248;     // 描画エリア幅(CSS px)
-  const big = [0.22,0.28,0.34,0.40].map(r=> Math.round(cw*r)); // 22/28/34/40%
-  return big[nearestDetentIdx(pos)];
+  const min = 2, max = Math.round(cw*0.40);
+  const t = i/(SIZE_STEPS-1);
+  return Math.max(2, Math.round(min + (max-min)*Math.pow(t, 1.7)));  // 細い側を細かく
 }
 document.getElementById("size").addEventListener("input",e=>{
-  let pos = +e.target.value;
-  if(pos > 50){                                              // 上半分：段にカチッと吸い付かせる
-    pos = SIZE_DETENTS[nearestDetentIdx(pos)];
-    e.target.value = pos;
-  }
+  const pos = Math.round(+e.target.value);   // 0〜11 の段（スライダー自体が段に吸い付く）
+  e.target.value = pos;
   size = sizeFromPos(pos);
-  LS.set("fg_sizePos", pos);   // 次回に引き継ぐ
+  LS.set("fg_sizePos", pos);   // 次回に引き継ぐ（段番号）
 });
 document.getElementById("brushSeg").addEventListener("click",e=>{
   const b = e.target.closest(".brush-opt"); if(!b) return;
@@ -1716,7 +1712,7 @@ function notifyZoomedOut(prev){
   if(!didInitialFocus) return;
   if(NOTE_W*zoom < 56 && NOTE_W*prev >= 56 && Date.now()-lastZoomOutNote > 6000){
     lastZoomOutNote = Date.now();
-    toast("もっともズームアウトした状態では個別の半紙が読み込まれないことがあります。少しだけズームインしてみてね。");
+    toast("最大ズームアウト状態では個別の半紙が読み込まれません。");
   }
 }
 document.getElementById("zoomRange").addEventListener("input", e=> zoomTo(+e.target.value));
@@ -2007,7 +2003,7 @@ restoreDraft();   // 前回の描きかけがあれば復帰
 (function(){
   const sl = document.getElementById("size");
   const savedPos = LS.get("fg_sizePos"), savedBrush = LS.get("fg_brush");
-  const pos = (savedPos!=null && !isNaN(+savedPos)) ? clamp(+savedPos,0,100) : Math.floor(Math.random()*16);
+  const pos = (savedPos!=null && !isNaN(+savedPos)) ? clamp(Math.round(+savedPos),0,SIZE_STEPS-1) : Math.floor(Math.random()*3); // 既定は細めの段をランダム
   sl.value = pos;
   size = sizeFromPos(pos);
   brushType = ["taper","round","flat"].includes(savedBrush) ? savedBrush : ["taper","round","flat"][Math.floor(Math.random()*3)];
