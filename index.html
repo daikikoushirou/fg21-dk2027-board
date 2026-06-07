@@ -688,6 +688,7 @@ let brushType = "taper";              // "taper"=先細, "flat"=平筆
 const NIB = -35 * Math.PI/180;        // 平筆のニブ角度
 let drawing = false;
 let last = null;
+let lastMid = null;   // 中点スムージング用：直前のセグメント終点（点列化を防ぐ）
 let lastTime = 0;
 let lastWidth = 0;
 let lastDir = null;   // 直近の運筆方向（抜きの三角テールに使う）
@@ -723,7 +724,7 @@ function start(e){
   e.preventDefault();
   if(fillMode){ pushUndo(); const fp = pos(e); floodFill(fp.x, fp.y); return; } // バケツ：タップ位置を塗る
   pushUndo();
-  drawing = true; last = pos(e); lastTime = performance.now(); lastDir = null; penOff = false; strokeLen = 0;
+  drawing = true; last = pos(e); lastMid = last; lastTime = performance.now(); lastDir = null; penOff = false; strokeLen = 0;
   if(!erasing && brushType==="flat"){ flatDab(last); return; }
   if(!erasing && brushType==="round"){ dot(last, size*DPR); return; } // 丸筆：一定の太さ
   lastWidth = erasing ? size*2*DPR : Math.max(1, size*0.12)*DPR; // 入り：ごく細い種点から
@@ -749,7 +750,7 @@ function flatStroke(a,b){
 }
 function resumeAt(p){            // エリアに戻った：同じ太さのまま継ぎ目なく再開（線でつながない）
   penOff = false;
-  last = p; lastTime = performance.now(); lastDir = null;
+  last = p; lastMid = p; lastTime = performance.now(); lastDir = null;
 }
 function move(e){
   if(!drawing) return; e.preventDefault();
@@ -759,11 +760,9 @@ function move(e){
   if(penOff || !last){ resumeAt(p); return; } // 戻ってきた→同じストロークとして再開
 
   if(!erasing && brushType==="flat"){ flatStroke(last, p); last = p; return; }
-  if(!erasing && brushType==="round"){          // 丸筆：太さ一定・丸い筆
+  if(!erasing && brushType==="round"){          // 丸筆：太さ一定・丸い筆。前回点→現在点を必ず一本の線でつなぐ
     ctx.strokeStyle=color; ctx.lineWidth=size*DPR; ctx.lineCap="round"; ctx.lineJoin="round";
-    ctx.beginPath(); ctx.moveTo(last.x,last.y);
-    const mx=(last.x+p.x)/2, my=(last.y+p.y)/2;
-    ctx.quadraticCurveTo(last.x,last.y,mx,my); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(last.x,last.y); ctx.lineTo(p.x,p.y); ctx.stroke();
     last = p; return;
   }
 
@@ -789,8 +788,7 @@ function move(e){
   ctx.lineCap = "round"; ctx.lineJoin = "round";
   ctx.beginPath();
   ctx.moveTo(last.x,last.y);
-  const mx=(last.x+p.x)/2, my=(last.y+p.y)/2;
-  ctx.quadraticCurveTo(last.x,last.y,mx,my);
+  ctx.lineTo(p.x,p.y);        // 前回点→現在点を必ず一本の線でつなぐ（高速でも途切れない）
   ctx.stroke();
 
   if(dist>0.5){ lastDir = { x:dx/dist, y:dy/dist }; }
@@ -801,11 +799,12 @@ function taperTail(){
   if(!last || !lastDir || lastWidth<=0.6) return;
   const steps = 6;
   const len = Math.min(lastWidth*1.6, size*DPR*1.4);
-  let x = last.x, y = last.y, w0 = lastWidth;
+  const startP = last;                       // 線が実際に終わっている点から繋ぐ
+  let x = startP.x, y = startP.y, w0 = lastWidth;
   ctx.strokeStyle = color; ctx.lineCap = "round"; ctx.lineJoin = "round";
   for(let i=1;i<=steps;i++){
-    const nx = last.x + lastDir.x*(len*i/steps);
-    const ny = last.y + lastDir.y*(len*i/steps);
+    const nx = startP.x + lastDir.x*(len*i/steps);
+    const ny = startP.y + lastDir.y*(len*i/steps);
     const w1 = lastWidth*(1 - i/steps);   // 先端まで0へ
     ctx.lineWidth = Math.max(0.3, (w0+w1)/2);
     ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(nx,ny); ctx.stroke();
