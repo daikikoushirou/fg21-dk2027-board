@@ -776,6 +776,24 @@ function floodFill(sx, sy){
       x++;
     }
   }
+  // 1px 外側に拡張して塗る（境界のにじみ・隙間を埋める）
+  const add = [];
+  for(let y=0;y<H;y++){
+    for(let x=0;x<W;x++){
+      const id=y*W+x;
+      if(seen[id]) continue;
+      let near=false;
+      for(let dy=-1;dy<=1 && !near;dy++){
+        for(let dx=-1;dx<=1;dx++){
+          if(!dy && !dx) continue;
+          const ny=y+dy, nx=x+dx;
+          if(ny>=0&&ny<H&&nx>=0&&nx<W && seen[ny*W+nx]){ near=true; break; }
+        }
+      }
+      if(near) add.push(id);
+    }
+  }
+  for(const id of add){ const p=id*4; data[p]=fr; data[p+1]=fg; data[p+2]=fb; data[p+3]=255; }
   ctx.putImageData(img,0,0);
 }
 
@@ -885,18 +903,23 @@ function drawSeal(o, cx, cy, side){
   o.arcTo(cx+side,cy+side,cx,cy+side,r); o.arcTo(cx,cy+side,cx,cy,r);
   o.arcTo(cx,cy,cx+side,cy,r); o.closePath(); o.stroke();
   o.fillStyle = "#b5341f";
-  o.strokeStyle = "#b5341f";
-  o.lineJoin = "round";
   o.textAlign = "center"; o.textBaseline = "middle";
   const colL = cx + side*0.29, colR = cx + side*0.71;
   const rows = [cy+side*0.215, cy+side*0.5, cy+side*0.785];
-  const big = `800 ${Math.round(side*0.27)}px "Shippori Mincho", serif`;
-  const small = `800 ${Math.round(side*0.19)}px "Shippori Mincho", serif`;
-  const ink = (t,x,y)=>{ o.fillText(t,x,y); o.lineWidth=Math.max(1,side*0.03); o.strokeText(t,x,y); }; // 太らせる
-  o.font = big; ink("園", colL, rows[0]); ink("双", colR, rows[0]);
-  o.font = big; ink("祭", colL, rows[1]); ink("葉", colR, rows[1]);
-  o.font = small; ink("21", colL, rows[2]);
-  o.font = big;   ink("学", colR, rows[2]);
+  const big = `700 ${Math.round(side*0.27)}px "Shippori Mincho", serif`;
+  o.font = big;
+  o.fillText("園", colL, rows[0]); o.fillText("双", colR, rows[0]);
+  o.fillText("祭", colL, rows[1]); o.fillText("葉", colR, rows[1]);
+  o.fillText("学", colR, rows[2]);
+  // 「21」は2文字で1文字ぶん扱い：高さは他の字と同じ、横だけ枠に収まるよう詰める
+  const w21 = o.measureText("21").width;
+  const target = side*0.40;
+  const sx21 = w21 > target ? target/w21 : 1;
+  o.save();
+  o.translate(colL, rows[2]);
+  o.scale(sx21, 1);
+  o.fillText("21", 0, 0);
+  o.restore();
   o.restore();
 }
 function exportImage(){
