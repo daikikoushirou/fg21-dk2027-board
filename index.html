@@ -1263,7 +1263,7 @@ async function createPost(nx, ny){
     // 後片付け
     placing = false; ghostEl.classList.remove("show"); wallEl.classList.remove("placing");
     postBtn.textContent = "貼 る";
-    setDeskCollapsed(deskPrevCollapsed);   // 「半紙にかく」を元の状態に戻す
+    setDeskCollapsed(isMobileView() ? true : deskPrevCollapsed);   // モバイルは貼ったら閉じる
     ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); undoStack=[];
     setMsg("");
     openAngleBar(angle);
@@ -1608,12 +1608,16 @@ function toast(msg){
 /* ---------- floating desk collapse ---------- */
 const floatDesk = document.getElementById("floatDesk");
 const deskToggleBtn = document.getElementById("deskToggle");
+const deskBar = floatDesk.querySelector(".desk-bar");
+const deskBarTitle = floatDesk.querySelector(".desk-bar-title");
 let deskPrevCollapsed = false;
+const isMobileView = ()=> window.innerWidth <= 560;
 function setDeskCollapsed(c){
   floatDesk.classList.toggle("collapsed", c);
   deskToggleBtn.textContent = c ? "＋" : "−";
+  deskBarTitle.textContent = c ? "半紙を広げる" : "半紙";
 }
-deskToggleBtn.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
+deskBar.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
 
 /* ---------- init ---------- */
 setupCanvas();
@@ -1630,6 +1634,7 @@ setupCanvas();
 if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Shippori Mincho"').catch(()=>{}); }
 computeZoomMin();
 applyZoom();
+if(isMobileView()) setDeskCollapsed(true);   // モバイルは初期状態で閉じる
 requestAnimationFrame(()=>{ randomStartScroll(); drawMinimap(); });
 listen();
 </script>
