@@ -456,6 +456,11 @@
   }
   .meguri button:hover{filter:brightness(1.05)}
   .meguri button:active{transform:scale(.96)}
+  .meguri.hint{animation:meguriHint 1.1s ease-in-out infinite}
+  @keyframes meguriHint{
+    0%,100%{box-shadow:0 4px 12px rgba(0,0,0,.3), 0 0 0 0 rgba(181,52,31,0)}
+    50%{box-shadow:0 4px 12px rgba(0,0,0,.3), 0 0 0 7px rgba(181,52,31,.38)}
+  }
   .meguri .lab{color:#e9dcc0;font-size:11px;font-family:"Shippori Mincho",serif;letter-spacing:.08em;padding:0 2px;white-space:nowrap}
   .minimap{
     width:184px;background:linear-gradient(155deg,#f3ecdc,#e7ddc6);
@@ -1055,6 +1060,7 @@ const LS = {
 };
 
 const posts = new Map();    // id -> {name,t,sou,del,hidden,nx,ny,angle}（画像は別パス）
+let postsLoaded = false;    // 初回ロード完了（完了まで「まだ誰も〜」を出さない）
 const souDone = new Set();
 const delDone = new Set();
 let justVoted = null;       // 直前にそうだねした半紙（カウントをポンと跳ねさせる）
@@ -1180,14 +1186,18 @@ function render(){
   const visible = (admin ? list : list.filter(p=> !p.hidden && (p.del||0) < DEL_THRESHOLD))
     .filter(p=> typeof p.id==="string" && /^[A-Za-z0-9_-]+$/.test(p.id));
   visible.sort((a,b)=> (a.t||0)-(b.t||0)); // 古い順に重ねる（新しいものが上）
-  countEl.textContent = visible.length ? visible.length + " 枚" : "まだ0枚";
+  countEl.textContent = visible.length ? visible.length + " 枚" : (postsLoaded ? "まだ0枚" : "読み込み中…");
 
   // メッセージ帯（運営/空）。placing中の案内は別途出すので上書きしない
   if(!placing){
     if(admin){
       setMsg('<div class="admin-banner"><span>運営モード：非表示の投稿も表示中。削除は元に戻せません。</span><span class="cancel" style="cursor:pointer;text-decoration:underline" onclick="exitAdmin()">終了</span></div>');
     } else if(!visible.length){
-      setMsg('<div class="empty"><span class="big">習</span>まだ誰も貼っていません。<br>左で書いて「貼る」を押そう。</div>');
+      if(postsLoaded){
+        setMsg('<div class="empty"><span class="big">習</span>まだ誰も貼っていません。<br>左で書いて「貼る」を押そう。</div>');
+      } else {
+        setMsg('<div class="loading">読み込み中…</div>');   // ロード中は空メッセージを出さない
+      }
     } else {
       setMsg("");
     }
@@ -1242,6 +1252,27 @@ function render(){
 
   if(typeof drawMinimap === "function") drawMinimap();
   scheduleLazy();   // 表示範囲の画像を読み込む
+  maybeNavHint();   // 初回：見る半紙があれば「半紙めぐり」も点滅させて動線を提示
+}
+
+/* 初回オンボーディング：描く（左上の半紙バー）と 見る（半紙めぐり）の2動線を提示 */
+let navHintArmed = false, navHintTimer = 0;
+function maybeNavHint(){
+  if(!navHintArmed) return;
+  const m = document.querySelector(".meguri");
+  const hasNotes = [...posts.values()].some(p=> admin || (!p.hidden && (p.del||0) < DEL_THRESHOLD));
+  if(m && hasNotes){                       // 見る対象がある時だけ点滅（空ボードでは出さない）
+    navHintArmed = false;
+    m.classList.add("hint");
+    clearTimeout(navHintTimer);
+    navHintTimer = setTimeout(()=> m.classList.remove("hint"), 6000);
+  }
+}
+function stopNavHint(){
+  navHintArmed = false;
+  clearTimeout(navHintTimer);
+  const m = document.querySelector(".meguri");
+  if(m) m.classList.remove("hint");
 }
 
 function showConnError(){
@@ -1252,6 +1283,15 @@ function listen(){
   if(!db){ showConnError(); return; }
   const postsRef = ref(db, "posts");
   try{
+    // 初回は全件を1回読んで「ロード完了」を確定させる（完了まで空メッセージを出さない）
+    get(postsRef).then(snap=>{
+      const v = snap && snap.val();
+      if(v){ Object.keys(v).forEach(k=> posts.set(k, v[k]||{})); }
+      postsLoaded = true;
+      render();
+      if(!didInitialFocus && posts.size){ clearTimeout(focusTimer); focusTimer = setTimeout(initialFocus, 300); }
+    }).catch(()=>{ postsLoaded = true; render(); });
+
     onChildAdded(postsRef, snap=>{
       posts.set(snap.key, snap.val()||{});
       render();
@@ -1263,7 +1303,6 @@ function listen(){
       posts.delete(id); imgCache.delete(id); imgState.delete(id); idbDel(id);
       render();
     });
-    setTimeout(()=>{ if(!posts.size) render(); }, 1200);
   }catch(e){ console.error(e); showConnError(); }
 }
 
@@ -1667,8 +1706,13 @@ async function adminDelete(id){
 }
 window.adminDelete = adminDelete;
 
+const IS_LOCAL = (location.protocol === "file:");   // ローカルで直接開いた状態
 function showAuthError(){
-  setMsg('<div class="err">認証に接続できませんでした。Firebaseコンソールで「Authentication → Sign-in method」の匿名ログインを有効にしてください。</div>');
+  if(IS_LOCAL){
+    setMsg('<div class="empty"><span class="big">習</span>ローカルで開いています。共有ボードは公開URL（GitHub Pages）でのみ動きます。<br>ここでは描き味のお試しだけできます。</div>');
+  } else {
+    setMsg('<div class="err">認証に接続できませんでした。Firebaseコンソールで「Authentication → Sign-in method」の匿名ログインを有効にしてください。</div>');
+  }
 }
 
 /* ---------- zoom & scroll ---------- */
@@ -1832,6 +1876,7 @@ function drawMinimap(){
   g.strokeRect(vx+0.5, vy+0.5, Math.max(3,vw-1), Math.max(3,vh-1));
 }
 function miniJump(clientX, clientY){
+  stopNavHint();   // 見る動線を選択（点滅を止める）
   const r = miniCanvas.getBoundingClientRect();
   const fx = clamp((clientX-r.left)/r.width, 0, 1);
   const fy = clamp((clientY-r.top )/r.height,0, 1);
@@ -1889,6 +1934,7 @@ function centerOnNote(id, p, targetZoom){
   });
 }
 function gotoNote(step){
+  stopNavHint();   // 見る動線を選択（点滅を止める）
   const list = visibleByRecency();
   if(!list.length){ toast("まだ半紙がないよ"); return; }
   meguriIdx = ((meguriIdx + step) % list.length + list.length) % list.length;
@@ -1975,6 +2021,8 @@ function runGuide(){
   const guide = document.getElementById("guide");
   if(!guide || !floatDesk.classList.contains("collapsed") || LS.get("fg_guideSeen")){ floatDesk.classList.remove("guiding"); return; }
   LS.set("fg_guideSeen", "1");               // 端末ごとに初回だけ
+  navHintArmed = true;                       // 「半紙めぐり」も点滅させて見る動線を提示（半紙が来たら作動）
+  maybeNavHint();                            // 既に半紙が読み込まれていればこの場で点滅
   floatDesk.classList.add("guiding");        // 中央表示中は左上の実バーを隠す
   guide.style.left = (window.innerWidth/2) + "px";
   guide.style.top  = (window.innerHeight/2) + "px";
@@ -1983,7 +2031,7 @@ function runGuide(){
   let done = false;
   const reveal = ()=> floatDesk.classList.remove("guiding");   // 実バーを出す
   const finish = ()=>{ if(done) return; done = true; reveal(); guide.classList.remove("show"); setTimeout(()=>guide.remove(), 450); };
-  guide.addEventListener("click", ()=>{ setDeskCollapsed(false); finish(); });
+  guide.addEventListener("click", ()=>{ setDeskCollapsed(false); stopNavHint(); finish(); });   // 描くを選択
   const CENTER_DWELL = 1500, MOVE = 800, LINGER = 600;
   setTimeout(()=>{                            // 左上へ移動
     if(done) return;
@@ -2018,7 +2066,7 @@ requestAnimationFrame(()=>{ randomStartScroll(); drawMinimap(); });
 
 /* ---------- 認証：全員まず匿名サインイン。運営はメール/パスワードで本人だけ ---------- */
 function startBoard(){ if(authStarted) return; authStarted = true; listen(); }
-if(auth){
+if(auth && !IS_LOCAL){
   onAuthStateChanged(auth, user=>{
     myUid = user ? user.uid : null;
     admin = !!(user && !user.isAnonymous && user.uid === ADMIN_UID);   // 本人UIDのみ運営
@@ -2027,6 +2075,8 @@ if(auth){
     render(); updateGearLabel();
   });
   signInAnonymously(auth).catch(e=>{ console.error(e); showAuthError(); });
+} else if(IS_LOCAL){
+  showAuthError();         // ローカルは共有不可の穏やかな案内のみ（描画の試用は可能）
 } else {
   showConnError();
 }
