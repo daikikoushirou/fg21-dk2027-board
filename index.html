@@ -616,6 +616,7 @@
 
   <div class="rotor" id="rotor"></div>
   <div class="guide" id="guide"><span>半紙を広げる</span><span class="g-plus">＋</span></div>
+  <div class="guide" id="guide2"><span>半紙めぐり</span><span class="g-plus">見</span></div>
 
   <div class="nav-cluster">
     <div class="meguri">
@@ -1252,27 +1253,37 @@ function render(){
 
   if(typeof drawMinimap === "function") drawMinimap();
   scheduleLazy();   // 表示範囲の画像を読み込む
-  maybeNavHint();   // 初回：見る半紙があれば「半紙めぐり」も点滅させて動線を提示
+  tryNavGuide();    // 初回：見る半紙が来たら「半紙めぐり」ガイドを飛ばす
 }
 
-/* 初回オンボーディング：描く（左上の半紙バー）と 見る（半紙めぐり）の2動線を提示 */
-let navHintArmed = false, navHintTimer = 0;
-function maybeNavHint(){
-  if(!navHintArmed) return;
-  const m = document.querySelector(".meguri");
+/* 初回オンボーディング：見る動線（半紙めぐり）も、半紙バーと同じく中央→右下へ飛んでアピール */
+let navGuideArmed = false, navGuideStarted = false;
+function tryNavGuide(){
+  if(!navGuideArmed || navGuideStarted) return;
+  const meguri = document.querySelector(".meguri");
+  const g2 = document.getElementById("guide2");
   const hasNotes = [...posts.values()].some(p=> admin || (!p.hidden && (p.del||0) < DEL_THRESHOLD));
-  if(m && hasNotes){                       // 見る対象がある時だけ点滅（空ボードでは出さない）
-    navHintArmed = false;
-    m.classList.add("hint");
-    clearTimeout(navHintTimer);
-    navHintTimer = setTimeout(()=> m.classList.remove("hint"), 6000);
-  }
+  if(!meguri || !g2 || !hasNotes) return;          // 見る対象がある時だけ
+  navGuideStarted = true; navGuideArmed = false;
+  const cx = window.innerWidth/2, cy = window.innerHeight/2;
+  g2.style.left = cx + "px"; g2.style.top = (cy+44) + "px"; g2.style.transform = "translate(-50%,-50%)";
+  g2.classList.add("show");
+  let done = false;
+  const finish = ()=>{ if(done) return; done = true; g2.classList.remove("show"); meguri.classList.remove("hint"); setTimeout(()=>g2.remove(), 450); };
+  g2.addEventListener("click", ()=>{ stopNavHint(); finish(); });
+  const CENTER_DWELL = 1500, MOVE = 800, LINGER = 900;
+  setTimeout(()=>{                                  // 右下の「半紙めぐり」へ移動
+    if(done) return;
+    const r = meguri.getBoundingClientRect();
+    g2.style.left = r.left + "px"; g2.style.top = r.top + "px"; g2.style.transform = "translate(0,0)";
+    meguri.classList.add("hint");                   // 到着で本体を点滅
+  }, CENTER_DWELL);
+  setTimeout(finish, CENTER_DWELL + MOVE + LINGER);
 }
 function stopNavHint(){
-  navHintArmed = false;
-  clearTimeout(navHintTimer);
-  const m = document.querySelector(".meguri");
-  if(m) m.classList.remove("hint");
+  navGuideArmed = false; navGuideStarted = true;     // 以後アピールしない
+  const m = document.querySelector(".meguri"); if(m) m.classList.remove("hint");
+  const g2 = document.getElementById("guide2"); if(g2 && g2.classList.contains("show")){ g2.classList.remove("show"); setTimeout(()=>g2.remove(),450); }
 }
 
 function showConnError(){
@@ -2021,8 +2032,8 @@ function runGuide(){
   const guide = document.getElementById("guide");
   if(!guide || !floatDesk.classList.contains("collapsed") || LS.get("fg_guideSeen")){ floatDesk.classList.remove("guiding"); return; }
   LS.set("fg_guideSeen", "1");               // 端末ごとに初回だけ
-  navHintArmed = true;                       // 「半紙めぐり」も点滅させて見る動線を提示（半紙が来たら作動）
-  maybeNavHint();                            // 既に半紙が読み込まれていればこの場で点滅
+  navGuideArmed = true; navGuideStarted = false;  // 見る動線も中央→右下へ飛ばす（半紙が来たら作動）
+  tryNavGuide();                             // 既に半紙が読み込まれていればこの場で発火
   floatDesk.classList.add("guiding");        // 中央表示中は左上の実バーを隠す
   guide.style.left = (window.innerWidth/2) + "px";
   guide.style.top  = (window.innerHeight/2) + "px";
