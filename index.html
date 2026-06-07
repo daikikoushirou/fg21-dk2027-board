@@ -79,9 +79,9 @@
 
   /* floating 半紙 panel */
   .float-desk{
-    position:absolute;top:78px;left:18px;z-index:20;
+    position:absolute;top:14px;left:14px;z-index:20;
     width:330px;max-width:calc(100vw - 36px);
-    max-height:calc(100dvh - 96px);
+    max-height:calc(100dvh - 28px);
     display:flex;flex-direction:column;
     background:linear-gradient(150deg,#efe6cf,#e5d7b4);
     border-radius:14px;
@@ -111,7 +111,7 @@
   .float-desk.collapsed{width:auto;max-width:none}
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
   @media(max-width:560px){
-    .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:70px;max-height:calc(100dvh - 80px)}
+    .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:14px;max-height:calc(100dvh - 28px)}
     .float-tools .zoom-ctl{display:none}
     .float-tools{padding:7px 11px}
   }
@@ -401,6 +401,14 @@
     cursor:pointer;user-select:none;
   }
   .rotor-flip.active{background:var(--shu);color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+  .rotor-cancel{
+    position:absolute;left:50%;top:0;transform:translateX(-50%);
+    font-size:13px;line-height:1;padding:6px 14px;border-radius:999px;
+    background:#e7d9bb;color:var(--ink-faint);font-family:"Zen Kaku Gothic New",sans-serif;
+    box-shadow:0 2px 6px rgba(0,0,0,.3), inset 0 0 0 1px rgba(140,110,60,.4);
+    cursor:pointer;user-select:none;white-space:nowrap;
+  }
+  .rotor-cancel:hover{filter:brightness(1.05)}
   /* 初回ガイド：中央で点滅→左上のバー位置へ移動 */
   .guide{
     position:fixed;z-index:80;
@@ -1305,7 +1313,7 @@ notesEl.addEventListener("click", e=>{
   raiseNote(note.dataset.id);
   setActive(note.dataset.id);
 });
-document.addEventListener("keydown", e=>{ if(e.key==="Escape" && placing) cancelPlacing(); });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ if(rotorEl.classList.contains("show")) cancelRotor(); else if(placing) cancelPlacing(); } });
 document.addEventListener("keydown", e=>{
   if((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key==="z" || e.key==="Z")){
     const t = e.target;
@@ -1410,7 +1418,7 @@ document.addEventListener("pointerdown", e=>{
 
 /* ---------- PC: 円形ダイヤルで回転（静止は±20°）。横を越えて引き回すと反対側へ「ぐるん」 ---------- */
 const rotorEl = document.getElementById("rotor");
-let rotorId = null, rotorR = 0, rotorArc = 0, rotorAngle = 0, rotorOpenedAt = 0, rotorDragging = false;
+let rotorId = null, rotorR = 0, rotorArc = 0, rotorAngle = 0, rotorInitAngle = 0, rotorOpenedAt = 0, rotorDragging = false;
 const ROTOR_MAX = 20;                        // 静止時の傾き上限（上向き・反転とも±20°）
 function rotorCenter(){
   const p = posts.get(rotorId); if(!p) return null;
@@ -1432,6 +1440,7 @@ function buildRotor(){
   const PAD = 52;                             // 当たり判定の余白
   const R = Rarc + PAD; rotorR = R; rotorArc = Rarc;
   const h = rotorPoint(rotorAngle, R, Rarc);
+  const cancelTop = Math.max(2, R - NOTE_H*zoom*0.5 - 42);   // 「やめる」は半紙の上あたり
   rotorEl.style.width = rotorEl.style.height = (2*R)+"px";
   rotorEl.innerHTML =
     `<svg width="${2*R}" height="${2*R}" viewBox="0 0 ${2*R} ${2*R}">`+
@@ -1441,7 +1450,8 @@ function buildRotor(){
     `<line id="rotorStem" x1="${R}" y1="${R}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}" stroke="rgba(181,52,31,.35)" stroke-width="2"/>`+
     `<circle cx="${R}" cy="${R}" r="3" fill="rgba(181,52,31,.6)"/>`+
     `<circle id="rotorHandle" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="13" fill="#b5341f" stroke="#fff" stroke-width="3"/>`+
-    `</svg>`;
+    `</svg>`+
+    `<button class="rotor-cancel" id="rotorCancel" title="やめる（Esc）" style="top:${cancelTop.toFixed(0)}px">やめる</button>`;
 }
 function positionRotor(){
   const c = rotorCenter(); if(!c) return;
@@ -1487,6 +1497,7 @@ function rotorRelease(){
 function openRotor(id, angle){
   rotorId = id;
   rotorAngle = snapAngle(angle);
+  rotorInitAngle = rotorAngle;        // キャンセル時に戻す角度
   buildRotor();
   positionRotor();
   rotorEl.classList.add("show");
@@ -1500,7 +1511,20 @@ function closeRotor(){
   if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }   // テープが生えてくる
   rotorId = null; editingId = null; rotorDragging = false;
 }
-rotorEl.addEventListener("pointerdown", e=>{ e.preventDefault(); rotorDragging = true; rotorDrag(e); });
+function cancelRotor(){                         // 位置決めをやめる＝最初の角度に戻して閉じる
+  if(!rotorEl.classList.contains("show")) return;
+  rotorDragging = false;
+  rotorAngle = rotorInitAngle;
+  applyRotor(true);
+  rotorEl.classList.remove("show");
+  const el = rotorNoteEl();
+  if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }
+  rotorId = null; editingId = null;
+}
+rotorEl.addEventListener("pointerdown", e=>{
+  if(e.target.closest("#rotorCancel")){ e.preventDefault(); e.stopPropagation(); cancelRotor(); return; }  // やめる
+  e.preventDefault(); rotorDragging = true; rotorDrag(e);
+});
 window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorDrag(e); });
 window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; rotorRelease(); } });
 // 外側をクリックで確定（開いた直後の一瞬は無視）
