@@ -197,6 +197,7 @@
   }
   .btn-ghost:hover{filter:brightness(1.04)}
   .btn-ghost.active{background:var(--shu);color:var(--paper);box-shadow:inset 0 0 0 1px var(--shu)}
+  #photoBtn{font-size:11.5px;line-height:1.25}
   .btn-post{
     flex:1;
     background:var(--shu);color:var(--paper);
@@ -341,6 +342,10 @@
   }
   .del-btn:hover{background:rgba(181,52,31,.12);color:var(--shu-deep)}
   .del-btn.done{color:#c9b48f;cursor:default}
+  /* 選択中（最前面）の半紙だけボタンが効く。非選択はボタンを淡色＝押せない見た目に */
+  .note .acts button{opacity:.45;transition:opacity .15s}
+  .note.sel .acts button, .note.mine .acts button{opacity:1}
+  .note.sel{outline:2px solid rgba(181,52,31,.55);outline-offset:2px;border-radius:3px}
   .admin-line{
     display:flex;align-items:center;gap:4px;margin-top:6px;flex-wrap:wrap;
     font-size:9px;color:var(--ink-faint);
@@ -375,6 +380,12 @@
     box-shadow:0 10px 24px rgba(0,0,0,.45);
   }
   .anglebar.show{display:flex}
+  /* PC: 半紙中央を軸にした弧型の回転スライダー */
+  .rotor{position:fixed;z-index:55;display:none;touch-action:none;cursor:grab}
+  .rotor.show{display:block}
+  .rotor:active{cursor:grabbing}
+  .rotor svg{display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
+  .rotor #rotorHandle{cursor:grab}
   .anglebar .lab{font-family:"Shippori Mincho",serif;font-weight:700;font-size:13px;color:var(--ink-faint)}
   .anglebar input[type=range]{flex:1;min-width:140px;accent-color:var(--shu)}
   .anglebar .val{font-size:13px;font-weight:700;color:var(--shu-deep);min-width:42px;text-align:right}
@@ -536,7 +547,7 @@
           <button class="btn-ghost" id="undo">もどす</button>
           <button class="btn-ghost" id="clear">消去</button>
           <button class="btn-ghost" id="fillBtn">塗り</button>
-          <button class="btn-ghost" id="photoBtn">写真読込</button>
+          <button class="btn-ghost" id="photoBtn">写真<br>読込</button>
         </div>
         <input type="file" id="photoInput" accept="image/*" style="display:none">
         <div class="hint">会場のお習字撮影は自分のもの限定。会場では撮影登録が必要です。</div>
@@ -556,6 +567,7 @@
     <span class="val" id="angleVal">0°</span>
     <button class="ok" id="angleOk">確定</button>
   </div>
+  <div class="rotor" id="rotor"></div>
 
   <div class="nav-cluster">
     <div class="meguri">
@@ -981,10 +993,21 @@ let editingId = null;       // 角度微調整中の自分の投稿
 const renderedIds = new Set(); // 既に表示済みの半紙（登場アニメの再生抑制用）
 let zCounter = 100;
 const zOverride = new Map();    // id -> z（クリックで上げた半紙）
+let activeNoteId = null;        // 「選択中＝最前面」の半紙。これ以外はボタンを押せない
 function raiseNote(id){
   zCounter++; zOverride.set(id, zCounter);
   const el = notesEl.querySelector('.note[data-id="'+id+'"]');
   if(el) el.style.zIndex = zCounter;
+}
+function setActive(id){
+  if(activeNoteId === id) return;
+  if(activeNoteId){
+    const prev = notesEl.querySelector('.note[data-id="'+activeNoteId+'"]');
+    if(prev) prev.classList.remove("sel");
+  }
+  activeNoteId = id;
+  const el = notesEl.querySelector('.note[data-id="'+id+'"]');
+  if(el) el.classList.add("sel");
 }
 
 /* ---------- 画像キャッシュ（メモリ + IndexedDB） ---------- */
@@ -1123,6 +1146,11 @@ function render(){
     </div>`;
   }).join("");
 
+  if(activeNoteId){
+    const ae = notesEl.querySelector('.note[data-id="'+activeNoteId+'"]');
+    if(ae) ae.classList.add("sel");
+  }
+
   renderedIds.clear();
   visible.forEach(p=> renderedIds.add(p.id));
 
@@ -1229,11 +1257,12 @@ wallEl.addEventListener("click", async e=>{
   const ny = (WALL_H-NOTE_H) ? y/(WALL_H-NOTE_H) : 0;
   await createPost(nx, ny);
 });
-// 重なった半紙：クリック／タップで上に出して下のものを確認できる
+// 重なった半紙：クリック／タップで上に出して下のものを確認できる（出すまではボタンを押せない）
 notesEl.addEventListener("click", e=>{
   if(placing) return;
   const note = e.target.closest(".note"); if(!note) return;
   raiseNote(note.dataset.id);
+  setActive(note.dataset.id);
 });
 document.addEventListener("keydown", e=>{ if(e.key==="Escape" && placing) cancelPlacing(); });
 document.addEventListener("keydown", e=>{
@@ -1259,7 +1288,7 @@ async function createPost(nx, ny){
   const RANDOM_NAMES = ["としあき","ﾄﾁｬｷ","としくん","「」","kakko","空白","jun","ぴるす","鍵最高","アージュ","雪の降る町","心理","ハデス","雨坊主","心太","ネギさま","こまち","jun君","自転車で来た","音ゲーの常連","DDRの常連"];
   let name = document.getElementById("who").value.trim().slice(0,16);
   if(!name) name = RANDOM_NAMES[Math.floor(Math.random()*RANDOM_NAMES.length)]; // 空欄ならランダム
-  const angle = rndAngle();
+  const angle = isMobileView() ? (Math.random()<0.5?-4:4) : rndAngle();  // モバイルは左右4°のみ
   const img = pendingImg;
   const meta = { name, t: Date.now(), sou:0, del:0, hidden:false, nx, ny, angle };  // 画像は含めない
   postBtn.disabled = true;
@@ -1277,8 +1306,13 @@ async function createPost(nx, ny){
     setDeskCollapsed(isMobileView() ? true : deskPrevCollapsed);   // モバイルは貼ったら閉じる
     ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); undoStack=[];
     setMsg("");
-    openAngleBar(angle);
-    render();
+    if(isMobileView()){
+      editingId = null;          // モバイルは角度調整なし（ランダム±4°のまま）
+      render();
+    } else {
+      render();
+      openRotor(id, angle);      // PCは半紙中央を軸にした弧型スライダーで回転
+    }
   }catch(e){
     console.error(e); toast("貼れませんでした…"); showConnError();
   }
@@ -1333,9 +1367,89 @@ document.addEventListener("pointerdown", e=>{
   if(angleBar.classList.contains("show") && (Date.now()-angleOpenedAt > 400) && !angleBar.contains(e.target)) closeAngle();
 });
 
+/* ---------- PC: 弧型の回転スライダー ---------- */
+const rotorEl = document.getElementById("rotor");
+let rotorId = null, rotorR = 0, rotorOpenedAt = 0, rotorDragging = false;
+const ROTOR_MAX = 40;                       // 回転の上限（左右40°）
+function rotorCenter(){
+  const p = posts.get(rotorId); if(!p) return null;
+  const r = wallEl.getBoundingClientRect();  // 拡縮・スクロール済みの矩形
+  return {
+    cx: r.left + (clamp(nxOf(p,rotorId),0,1)*(WALL_W-NOTE_W) + NOTE_W/2)*zoom,
+    cy: r.top  + (clamp(nyOf(p,rotorId),0,1)*(WALL_H-NOTE_H) + NOTE_H/2)*zoom
+  };
+}
+function rotorPoint(angle, R, Rt){           // 角度→ハンドル座標（真下=0、左で＋）
+  const rad = angle*Math.PI/180;
+  return { x:(R - Math.sin(rad)*Rt), y:(R + Math.cos(rad)*Rt) };
+}
+function buildRotor(angle){
+  const R = NOTE_H*zoom*0.5 + 42; rotorR = R;
+  const Rt = R - 12;
+  let pts = [];
+  for(let t=-ROTOR_MAX;t<=ROTOR_MAX;t+=2){ const q=rotorPoint(t,R,Rt); pts.push(q.x.toFixed(1)+","+q.y.toFixed(1)); }
+  const h = rotorPoint(angle,R,Rt);
+  rotorEl.style.width = rotorEl.style.height = (2*R)+"px";
+  rotorEl.innerHTML =
+    `<svg width="${2*R}" height="${2*R}" viewBox="0 0 ${2*R} ${2*R}">`+
+    `<polyline points="${pts.join(' ')}" fill="none" stroke="rgba(181,52,31,.45)" stroke-width="3" stroke-linecap="round"/>`+
+    `<line id="rotorStem" x1="${R}" y1="${R}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}" stroke="rgba(181,52,31,.35)" stroke-width="2"/>`+
+    `<circle cx="${R}" cy="${R}" r="3" fill="rgba(181,52,31,.6)"/>`+
+    `<circle id="rotorHandle" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="10" fill="#b5341f" stroke="#fff" stroke-width="2.5"/>`+
+    `</svg>`;
+}
+function positionRotor(){
+  const c = rotorCenter(); if(!c) return;
+  rotorEl.style.left = (c.cx - rotorR) + "px";
+  rotorEl.style.top  = (c.cy - rotorR) + "px";
+}
+function openRotor(id, angle){
+  rotorId = id;
+  buildRotor(clamp(angle,-ROTOR_MAX,ROTOR_MAX));
+  positionRotor();
+  rotorEl.classList.add("show");
+  rotorOpenedAt = Date.now();
+}
+function rotorSetAngle(angle, write){
+  angle = clamp(Math.round(angle), -ROTOR_MAX, ROTOR_MAX);
+  const p = posts.get(rotorId); if(p) p.angle = angle;
+  setNoteTransform(rotorId, angle);
+  const h = rotorPoint(angle, rotorR, rotorR-12);
+  const hd = rotorEl.querySelector("#rotorHandle"), st = rotorEl.querySelector("#rotorStem");
+  if(hd){ hd.setAttribute("cx", h.x.toFixed(1)); hd.setAttribute("cy", h.y.toFixed(1)); }
+  if(st){ st.setAttribute("x2", h.x.toFixed(1)); st.setAttribute("y2", h.y.toFixed(1)); }
+  if(write && db) update(ref(db, "posts/"+rotorId), { angle }).catch(()=>{});
+}
+function angleFromPointer(e){
+  const c = rotorCenter(); if(!c) return 0;
+  const dx = e.clientX - c.cx, dy = e.clientY - c.cy;
+  return Math.atan2(-dx, dy) * 180/Math.PI;   // 真下=0、左へ回すと＋
+}
+function closeRotor(){
+  if(!rotorEl.classList.contains("show")) return;
+  const p = posts.get(rotorId);
+  rotorSetAngle(p ? p.angle : 0, true);        // 最終角を保存
+  rotorEl.classList.remove("show");
+  const el = rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null;
+  if(el) el.classList.remove("mine");
+  rotorId = null; editingId = null; rotorDragging = false;
+}
+rotorEl.addEventListener("pointerdown", e=>{ e.preventDefault(); rotorDragging = true; rotorSetAngle(angleFromPointer(e), false); });
+window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorSetAngle(angleFromPointer(e), false); });
+window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; const p = posts.get(rotorId); rotorSetAngle(p?p.angle:0, true); } });
+// 外側をクリックで確定（開いた直後の一瞬は無視）
+document.addEventListener("pointerdown", e=>{
+  if(rotorEl.classList.contains("show") && (Date.now()-rotorOpenedAt > 400) && !rotorEl.contains(e.target)) closeRotor();
+});
+scrollEl.addEventListener("scroll", ()=>{ if(rotorEl.classList.contains("show")) positionRotor(); }, {passive:true});
+
 /* ---------- voting (transaction) ---------- */
 async function vote(type, id){
   if(!db) return;
+  if(id !== activeNoteId){      // 最前面に出ていない半紙は、まず前に出すだけ（誤操作防止）
+    raiseNote(id); setActive(id);
+    return;
+  }
   if(type==="sou"){
     if(souDone.has(id)){ toast("もう押したよ"); return; }
     souDone.add(id);
