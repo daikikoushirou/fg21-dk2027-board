@@ -147,6 +147,18 @@
     box-shadow:0 -10px 12px -10px rgba(60,40,10,.20);
   }
   .desk-foot .name-field{margin-bottom:8px}
+  /* もっと下に道具がある合図（モバイルでスクロール可能かつ最下部でない時だけ） */
+  .desk-more{
+    position:absolute;left:50%;transform:translateX(-50%);z-index:3;
+    display:none;align-items:center;justify-content:center;
+    width:30px;height:30px;border-radius:50%;
+    background:rgba(231,217,187,.96);color:var(--ink-faint);
+    font-size:13px;line-height:1;cursor:pointer;
+    box-shadow:0 3px 8px rgba(0,0,0,.28), inset 0 0 0 1px rgba(140,110,60,.35);
+    animation:deskMoreBob 1.4s ease-in-out infinite;
+  }
+  .desk-more.show{display:flex}
+  @keyframes deskMoreBob{0%,100%{margin-top:0}50%{margin-top:3px}}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .swatch{
     width:30px;height:30px;border-radius:50%;
@@ -591,6 +603,7 @@
         </div>
       </div>
     </div>
+    <div class="desk-more" id="deskMore" aria-hidden="true">▼</div>
   </section>
 
   <div class="rotor" id="rotor"></div>
@@ -625,22 +638,34 @@ const firebaseConfig = {
 };
 /* ↑↑↑ databaseURL が空だと共有ボードは動きません ↑↑↑ */
 
-const DEL_THRESHOLD = 5;          // del がこの数たまると自動で非表示
-const ADMIN_PASS = "futaba";      // ★運営パスワード（必ず変更してください）
+const DEL_THRESHOLD = 5;          // del がこの数たまるとクライアント側でソフト非表示（恒久削除は運営のみ）
+// ★運営（オーナー）の Firebase Auth UID。下の手順で取得して貼り付ける。
+//   Firebaseコンソール → Authentication → Users → 作成したメールアカウントの「ユーザーUID」
+//   ※同じUIDをデータベースのルールにも貼り付けること（下のメッセージ参照）。秘密情報ではない。
+const ADMIN_UID = "VRZS1oZuihN7if6GD2yuP1qvDik1";
+const POST_COOLDOWN_MS = 40000;   // 連続投稿の最短間隔（サーバ側ルールと一致させること）
+let lastPostAt = (function(){ try{ return +localStorage.getItem("fg_lastPost")||0; }catch(e){ return 0; } })();   // 端末に残る前回投稿時刻（事前警告用）
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getDatabase, ref, push, set, update, remove, get,
+  getDatabase, ref, push, set, update, remove, get, serverTimestamp,
   onChildAdded, onChildChanged, onChildRemoved, runTransaction
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+import {
+  getAuth, onAuthStateChanged, signInAnonymously,
+  signInWithEmailAndPassword, signOut
+} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 
-let db = null;
+let db = null, auth = null;
 try {
   const app = initializeApp(firebaseConfig);
   db = getDatabase(app);
+  auth = getAuth(app);
 } catch(e) {
   console.error("Firebase init failed", e);
 }
+let myUid = null;            // 自分の認証UID（匿名 or 運営）
+let authStarted = false;     // 認証完了後に一度だけ購読開始
 
 /* ---------- canvas drawing ---------- */
 const pad = document.getElementById("pad");
@@ -1095,27 +1120,29 @@ async function idbDel(id){
   const db = await openIDB(); if(!db) return;
   try{ db.transaction("imgs","readwrite").objectStore("imgs").delete(id); }catch(_){}
 }
+function isImgData(d){ return typeof d==="string" && d.startsWith("data:image/"); }   // XSS対策：画像以外は弾く
 function seedImage(id, data){   // 自分の投稿などをキャッシュに先置き
+  if(!isImgData(data)) return;
   imgCache.set(id, data); imgState.set(id, "loaded"); idbPut(id, data);
 }
 function setNoteImg(id){
-  const data = imgCache.get(id); if(!data) return;
+  const data = imgCache.get(id); if(!isImgData(data)) return;   // dataURLのみ。属性ではなくプロパティ代入（XSS安全）
   const el = notesEl.querySelector('.note[data-id="'+id+'"] .note-img');
   if(el){ el.src = data; el.classList.add("ready"); }
 }
 async function loadImage(id){
   if(imgState.get(id)==="loaded" || imgState.get(id)==="loading") return;
   const p = posts.get(id);
-  if(p && p.img){ seedImage(id, p.img); setNoteImg(id); return; } // 旧形式（埋め込み）に対応
+  if(p && isImgData(p.img)){ seedImage(id, p.img); setNoteImg(id); return; } // 旧形式（埋め込み）に対応
   imgState.set(id, "loading");
   // 1) IndexedDB
   const local = await idbGet(id);
-  if(local){ imgCache.set(id, local); imgState.set(id,"loaded"); setNoteImg(id); return; }
+  if(isImgData(local)){ imgCache.set(id, local); imgState.set(id,"loaded"); setNoteImg(id); return; }
   // 2) サーバから1枚だけ取得
   try{
     const snap = await get(ref(db, "imgs/"+id));
     const data = snap && snap.val();
-    if(data){ imgCache.set(id, data); imgState.set(id,"loaded"); idbPut(id, data); setNoteImg(id); }
+    if(isImgData(data)){ imgCache.set(id, data); imgState.set(id,"loaded"); idbPut(id, data); setNoteImg(id); }
     else { imgState.set(id, "error"); }
   }catch(e){ imgState.set(id, "error"); }
 }
@@ -1152,7 +1179,10 @@ function setMsg(html){ msgEl.innerHTML = html || ""; }
 
 function render(){
   const list = [...posts.entries()].map(([id,p])=>({id,...p}));
-  const visible = admin ? list : list.filter(p=> !p.hidden);
+  // 運営は全部表示。一般表示は「運営が非表示」または「delがしきい値以上」を隠す（恒久削除は運営のみ）
+  // さらに、キーが安全な文字のみの半紙だけを描画（細工キーによるXSSを遮断）
+  const visible = (admin ? list : list.filter(p=> !p.hidden && (p.del||0) < DEL_THRESHOLD))
+    .filter(p=> typeof p.id==="string" && /^[A-Za-z0-9_-]+$/.test(p.id));
   visible.sort((a,b)=> (a.t||0)-(b.t||0)); // 古い順に重ねる（新しいものが上）
   countEl.textContent = visible.length ? visible.length + " 枚" : "まだ0枚";
 
@@ -1173,8 +1203,7 @@ function render(){
     const ang  = angOf(p,p.id);
     const aNorm = ((ang%360)+360)%360;
     const flippedCls = (aNorm>90 && aNorm<270) ? " flipped" : "";   // 上下反転している半紙
-    const cached = imgCache.get(p.id) || p.img || "";
-    const imgHtml = `<img class="note-img${cached?' ready':''}" alt=""${cached?` src="${cached}"`:''}>`;
+    const imgHtml = `<img class="note-img" alt="">`;   // srcはinnerHTMLに入れず、後でプロパティ代入（XSS安全）
     const souCls = (souDone.has(p.id) ? "sou-btn done" : "sou-btn") + (p.id===justVoted ? " pop" : "");
     if(p.id===justVoted) justVoted = null;
     const delCls = delDone.has(p.id) ? "del-btn done" : "del-btn";
@@ -1203,6 +1232,9 @@ function render(){
       ${adminLine}
     </div>`;
   }).join("");
+
+  // すでにキャッシュ済みの画像をプロパティ代入で表示（dataURLをHTMLに入れない）
+  visible.forEach(p=>{ if(imgCache.has(p.id)) setNoteImg(p.id); });
 
   if(activeNoteId){
     const ae = notesEl.querySelector('.note[data-id="'+activeNoteId+'"]');
@@ -1358,24 +1390,32 @@ postBtn.addEventListener("click", ()=>{
   if(placing){ cancelPlacing(); return; }
   if(!db){ showConnError(); return; }
   if(isBlank()){ toast("なにか書いてね"); return; }
+  const wait = Math.ceil((lastPostAt + POST_COOLDOWN_MS - Date.now())/1000);
+  if(wait > 0){ toast("あと "+wait+" 秒で投稿できます"); return; }   // 連投クールダウン（事前警告）
   pendingImg = exportImage();
   enterPlacing();
 });
 
 async function createPost(nx, ny){
+  if(!db || !myUid){ toast("接続中です。少し待ってね"); return; }
   const RANDOM_NAMES = ["としあき","ﾄﾁｬｷ","としくん","「」","kakko","空白","jun","ぴるす","鍵最高","アージュ","雪の降る町","心理","ハデス","雨坊主","心太","ネギさま","こまち","jun君","自転車で来た","音ゲーの常連","DDRの常連"];
   let name = document.getElementById("who").value.trim().slice(0,16);
   if(!name) name = RANDOM_NAMES[Math.floor(Math.random()*RANDOM_NAMES.length)]; // 空欄ならランダム
   const angle = isMobileView() ? (Math.random()<0.5?-4:4) : rndAngle();  // モバイルは左右4°のみ
   const img = pendingImg;
-  const meta = { name, t: Date.now(), sou:0, del:0, hidden:false, nx, ny, angle };  // 画像は含めない
+  const meta = { name, t: Date.now(), sou:0, del:0, hidden:false, nx, ny, angle, uid: myUid };  // 画像は含めない・作成者UID付き
   postBtn.disabled = true;
   try{
-    const newRef = push(ref(db, "posts"));
-    const id = newRef.key;
-    seedImage(id, img);                    // 先にキャッシュ（自分の画像は取得不要）
-    await set(ref(db, "imgs/"+id), img);   // 画像は別パス
-    await set(newRef, meta);               // メタは軽い
+    const id = push(ref(db, "posts")).key;   // キーだけ先に確保（まだ書かない）
+    seedImage(id, img);                       // 先にキャッシュ（自分の画像は取得不要）
+    // 画像・メタ・連投スロットルを1回の書き込みでまとめて確定（サーバ側でクールダウン判定）
+    await update(ref(db), {
+      ["imgs/"+id]: img,
+      ["posts/"+id]: meta,
+      ["throttle/"+myUid]: serverTimestamp()
+    });
+    lastPostAt = Date.now();
+    LS.set("fg_lastPost", String(lastPostAt));
     editingId = id;
     posts.set(id, meta);
     // 後片付け
@@ -1394,7 +1434,12 @@ async function createPost(nx, ny){
       openRotor(id, angle);      // PCは半紙中央を軸にした弧型スライダーで回転
     }
   }catch(e){
-    console.error(e); toast("貼れませんでした…"); showConnError();
+    console.error(e);
+    const wait = Math.ceil((lastPostAt + POST_COOLDOWN_MS - Date.now())/1000);
+    if(String(e && (e.code||e.message)).indexOf("PERMISSION_DENIED")>=0 || wait>0){
+      cancelPlacing();
+      toast(wait>0 ? ("あと "+wait+" 秒で投稿できます") : "連続投稿のため少し待ってね");
+    } else { toast("貼れませんでした…"); showConnError(); }
   }
   postBtn.disabled = false;
 }
@@ -1570,39 +1615,47 @@ async function vote(type, id){
     if(!confirm("この投稿を削除依頼（del）しますか？")) return;
     delDone.add(id);
     try{
-      let hiddenNow = false;
-      await runTransaction(ref(db, "posts/"+id), p => {
-        if(!p) return p;
-        p.del = (p.del||0)+1;
-        if(p.del >= DEL_THRESHOLD){ p.hidden = true; hiddenNow = true; }
-        return p;
-      });
-      toast(hiddenNow ? "非表示にしました" : "delしました");
+      await runTransaction(ref(db, "posts/"+id+"/del"), v => (v||0)+1);   // 報告カウントを1だけ加算
+      toast("delしました");
     }catch(e){ delDone.delete(id); toast("失敗しました"); }
   }
 }
 window.vote = vote;
 
-/* ---------- admin ---------- */
-document.getElementById("gear").addEventListener("click", ()=>{
+/* ---------- admin（運営）：認証で本人だけ。権限はDBルールが最終判定 ---------- */
+function updateGearLabel(){
+  const g = document.getElementById("gear");
+  if(g){ g.textContent = admin ? "★" : "⚙"; g.title = admin ? "運営モード（タップで終了）" : "運営ログイン"; }
+}
+document.getElementById("gear").addEventListener("click", async ()=>{
+  if(!auth){ toast("認証が使えません"); return; }
   if(admin){ exitAdmin(); return; }
-  const p = prompt("運営パスワードを入力");
-  if(p === null) return;
-  if(p === ADMIN_PASS){ admin = true; toast("運営モードON"); render(); }
-  else toast("パスワードが違います");
+  const email = prompt("運営メールアドレス");
+  if(email === null) return;
+  const pw = prompt("運営パスワード");
+  if(pw === null) return;
+  try{
+    await signInWithEmailAndPassword(auth, email.trim(), pw);   // onAuthStateChanged が admin を判定
+    // ログインできても本人UIDでなければ運営にはならない
+    setTimeout(()=>{ toast(admin ? "運営モードON" : "このアカウントは運営ではありません"); if(!admin){ exitAdmin(); } }, 300);
+  }catch(e){ console.error(e); toast("ログインに失敗しました"); }
 });
-function exitAdmin(){ admin = false; toast("運営モードOFF"); render(); }
+async function exitAdmin(){
+  admin = false; render(); updateGearLabel();
+  try{ if(auth){ await signOut(auth); } }catch(e){}   // 匿名に戻す（onAuthStateChangedで再サインイン）
+  toast("運営モードOFF");
+}
 window.exitAdmin = exitAdmin;
 
 async function adminRestore(id){
-  if(!db) return;
+  if(!db || !admin) return;
   try{ await update(ref(db, "posts/"+id), { hidden:false, del:0 }); toast("復活しました"); }
-  catch(e){ toast("失敗しました"); }
+  catch(e){ toast("権限がないか失敗しました"); }
 }
 window.adminRestore = adminRestore;
 
 async function adminDelete(id){
-  if(!db) return;
+  if(!db || !admin) return;
   if(!confirm("完全に削除します。元に戻せません。よろしいですか？")) return;
   try{
     await remove(ref(db, "posts/"+id));
@@ -1610,9 +1663,13 @@ async function adminDelete(id){
     imgCache.delete(id); imgState.delete(id); idbDel(id);
     toast("削除しました");
   }
-  catch(e){ toast("失敗しました"); }
+  catch(e){ toast("権限がないか失敗しました"); }
 }
 window.adminDelete = adminDelete;
+
+function showAuthError(){
+  setMsg('<div class="err">認証に接続できませんでした。Firebaseコンソールで「Authentication → Sign-in method」の匿名ログインを有効にしてください。</div>');
+}
 
 /* ---------- zoom & scroll ---------- */
 function applyZoom(){
@@ -1879,8 +1936,28 @@ function setDeskCollapsed(c){
   floatDesk.classList.toggle("collapsed", c);
   deskToggleBtn.textContent = c ? "＋" : "−";
   deskBarTitle.textContent = c ? "半紙を広げる" : "半紙";
+  requestAnimationFrame(updateDeskMore);
 }
 deskBar.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
+
+/* もっと下に道具がある時だけ ▼ を出す（モバイル・スクロール可能・最下部でない） */
+const deskBodyEl = document.getElementById("deskBody");
+const deskMoreEl = document.getElementById("deskMore");
+const deskFootEl = floatDesk.querySelector(".desk-foot");
+function updateDeskMore(){
+  if(!deskMoreEl || !deskBodyEl) return;
+  const collapsed = floatDesk.classList.contains("collapsed");
+  const more = (deskBodyEl.scrollHeight - deskBodyEl.scrollTop - deskBodyEl.clientHeight) > 8;
+  const show = !collapsed && isMobileView() && more;
+  if(show) deskMoreEl.style.bottom = ((deskFootEl ? deskFootEl.offsetHeight : 90) + 6) + "px";
+  deskMoreEl.classList.toggle("show", show);
+}
+if(deskBodyEl){
+  deskBodyEl.addEventListener("scroll", updateDeskMore, {passive:true});
+  deskMoreEl.addEventListener("click", ()=> deskBodyEl.scrollBy({top:deskBodyEl.clientHeight*0.6, behavior:"smooth"}));
+}
+window.addEventListener("resize", updateDeskMore);
+if(window.visualViewport) window.visualViewport.addEventListener("resize", updateDeskMore);
 
 /* 初回ガイド：画面中央で点滅 → 左上の「半紙を広げる」バーへスッと移動 → 短く点滅して消える */
 function runGuide(){
@@ -1927,7 +2004,21 @@ applyZoom();
 setDeskCollapsed(true);   // 初期状態は閉じる（PC・モバイルとも）
 floatDesk.classList.add("guiding");   // ガイドが中央にいる間は左上バーを隠す（runGuideで到着時に表示）
 requestAnimationFrame(()=>{ randomStartScroll(); drawMinimap(); });
-listen();
+
+/* ---------- 認証：全員まず匿名サインイン。運営はメール/パスワードで本人だけ ---------- */
+function startBoard(){ if(authStarted) return; authStarted = true; listen(); }
+if(auth){
+  onAuthStateChanged(auth, user=>{
+    myUid = user ? user.uid : null;
+    admin = !!(user && !user.isAnonymous && user.uid === ADMIN_UID);   // 本人UIDのみ運営
+    if(!user){ signInAnonymously(auth).catch(e=>{ console.error(e); showAuthError(); }); return; }
+    startBoard();          // 認証できた時だけ購読を開始（ルールが auth!=null を要求）
+    render(); updateGearLabel();
+  });
+  signInAnonymously(auth).catch(e=>{ console.error(e); showAuthError(); });
+} else {
+  showConnError();
+}
 setTimeout(runGuide, 450);   // 初回ガイド通知
 </script>
 </body>
