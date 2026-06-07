@@ -458,7 +458,7 @@
     .meguri button{width:42px;height:38px;font-size:16px}
   }
 
-  .note.found{outline:3px solid var(--shu);outline-offset:2px;z-index:25;animation:foundpulse 1.5s ease-out}
+  .note.found{outline:3px solid var(--shu);outline-offset:2px;z-index:25;animation:foundpulse 1.5s ease-out forwards}
   @keyframes foundpulse{0%{outline-color:var(--shu)}70%{outline-color:var(--shu)}100%{outline-color:rgba(181,52,31,0)}}
 
   @keyframes drop{from{opacity:0;transform:translateY(-22px)}to{opacity:1}}
@@ -1732,8 +1732,9 @@ function centerOnNote(id, p, targetZoom){
   drawMinimap();
   raiseNote(id);   // フォーカス対象を最前面に（下になっていても見えるように）
   requestAnimationFrame(()=>{
+    notesEl.querySelectorAll('.note.found').forEach(n=> n.classList.remove("found"));  // 他の半紙の赤枠は消す
     const el = notesEl.querySelector('.note[data-id="'+id+'"]');
-    if(el){ el.classList.remove("found"); void el.offsetWidth; el.classList.add("found"); }
+    if(el){ void el.offsetWidth; el.classList.add("found"); }
   });
 }
 function gotoNote(step){
