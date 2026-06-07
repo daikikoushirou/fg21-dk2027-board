@@ -642,7 +642,7 @@ const DEL_THRESHOLD = 5;          // del がこの数たまるとクライアン
 // ★運営（オーナー）の Firebase Auth UID。下の手順で取得して貼り付ける。
 //   Firebaseコンソール → Authentication → Users → 作成したメールアカウントの「ユーザーUID」
 //   ※同じUIDをデータベースのルールにも貼り付けること（下のメッセージ参照）。秘密情報ではない。
-const ADMIN_UID = "VRZS1oZuihN7if6GD2yuP1qvDik1";
+const ADMIN_UID = "PASTE_OWNER_UID_HERE";
 const POST_COOLDOWN_MS = 40000;   // 連続投稿の最短間隔（サーバ側ルールと一致させること）
 let lastPostAt = (function(){ try{ return +localStorage.getItem("fg_lastPost")||0; }catch(e){ return 0; } })();   // 端末に残る前回投稿時刻（事前警告用）
 
@@ -1436,9 +1436,12 @@ async function createPost(nx, ny){
   }catch(e){
     console.error(e);
     const wait = Math.ceil((lastPostAt + POST_COOLDOWN_MS - Date.now())/1000);
-    if(String(e && (e.code||e.message)).indexOf("PERMISSION_DENIED")>=0 || wait>0){
+    if(wait > 0){
       cancelPlacing();
-      toast(wait>0 ? ("あと "+wait+" 秒で投稿できます") : "連続投稿のため少し待ってね");
+      toast("あと "+wait+" 秒で投稿できます");   // 連投クールダウン中（端末が把握）
+    } else if(String(e && (e.code||e.message)).indexOf("PERMISSION_DENIED")>=0){
+      cancelPlacing();
+      toast("少し時間をおいて試してね");          // サーバ側で拒否（クールダウン等）
     } else { toast("貼れませんでした…"); showConnError(); }
   }
   postBtn.disabled = false;
