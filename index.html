@@ -87,7 +87,9 @@
     border-radius:14px;
     box-shadow:0 14px 34px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.4);
     overflow:hidden;
+    transition:opacity .4s;
   }
+  .float-desk.guiding{opacity:0;pointer-events:none}
   .desk-bar{
     display:flex;align-items:center;justify-content:space-between;gap:8px;
     padding:10px 12px 8px;flex:0 0 auto;
@@ -406,7 +408,7 @@
     font-family:"Shippori Mincho",serif;font-weight:700;font-size:16px;white-space:nowrap;
     box-shadow:0 12px 32px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.4);
     opacity:0;pointer-events:none;cursor:pointer;
-    transition:left .75s cubic-bezier(.4,0,.2,1), top .75s cubic-bezier(.4,0,.2,1), transform .75s cubic-bezier(.4,0,.2,1), opacity .45s;
+    transition:left .8s cubic-bezier(.85,0,.12,1), top .8s cubic-bezier(.85,0,.12,1), transform .8s cubic-bezier(.85,0,.12,1), opacity .4s;
   }
   .guide .g-plus{
     width:24px;height:24px;border-radius:50%;
@@ -1799,26 +1801,29 @@ function setDeskCollapsed(c){
 }
 deskBar.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
 
-/* 初回ガイド：画面中央で点滅 → 左上の「半紙を広げる」バーへ移動して点滅 → 消える */
+/* 初回ガイド：画面中央で点滅 → 左上の「半紙を広げる」バーへスッと移動 → 短く点滅して消える */
 function runGuide(){
   const guide = document.getElementById("guide");
-  if(!guide) return;
-  if(!floatDesk.classList.contains("collapsed")) return;   // すでに開いていれば出さない
+  if(!guide || !floatDesk.classList.contains("collapsed")){ floatDesk.classList.remove("guiding"); return; }
+  floatDesk.classList.add("guiding");        // 中央表示中は左上の実バーを隠す
   guide.style.left = (window.innerWidth/2) + "px";
   guide.style.top  = (window.innerHeight/2) + "px";
   guide.style.transform = "translate(-50%,-50%)";
   guide.classList.add("show");
   let done = false;
-  const finish = ()=>{ if(done) return; done = true; guide.classList.remove("show"); setTimeout(()=>guide.remove(), 500); };
+  const reveal = ()=> floatDesk.classList.remove("guiding");   // 実バーを出す
+  const finish = ()=>{ if(done) return; done = true; reveal(); guide.classList.remove("show"); setTimeout(()=>guide.remove(), 450); };
   guide.addEventListener("click", ()=>{ setDeskCollapsed(false); finish(); });
-  setTimeout(()=>{                                  // 左上の実際のバー位置へ移動
+  const CENTER_DWELL = 1500, MOVE = 800, LINGER = 600;
+  setTimeout(()=>{                            // 左上へ移動
     if(done) return;
     const r = floatDesk.getBoundingClientRect();
     guide.style.left = r.left + "px";
     guide.style.top  = r.top + "px";
     guide.style.transform = "translate(0,0)";
-  }, 1700);
-  setTimeout(finish, 4400);                          // 自動で消える
+  }, CENTER_DWELL);
+  setTimeout(reveal, CENTER_DWELL + MOVE);     // 到着で実バーをフェードイン
+  setTimeout(finish, CENTER_DWELL + MOVE + LINGER);
 }
 
 /* ---------- init ---------- */
@@ -1837,9 +1842,10 @@ if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Ship
 computeZoomMin();
 applyZoom();
 setDeskCollapsed(true);   // 初期状態は閉じる（PC・モバイルとも）
+floatDesk.classList.add("guiding");   // ガイドが中央にいる間は左上バーを隠す（runGuideで到着時に表示）
 requestAnimationFrame(()=>{ randomStartScroll(); drawMinimap(); });
 listen();
-setTimeout(runGuide, 600);   // 初回ガイド通知
+setTimeout(runGuide, 450);   // 初回ガイド通知
 </script>
 </body>
 </html>
