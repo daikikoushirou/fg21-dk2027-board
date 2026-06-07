@@ -1401,21 +1401,19 @@ async function createPost(nx, ny){
   const RANDOM_NAMES = ["としあき","ﾄﾁｬｷ","としくん","「」","kakko","空白","jun","ぴるす","鍵最高","アージュ","雪の降る町","心理","ハデス","雨坊主","心太","ネギさま","こまち","jun君","自転車で来た","音ゲーの常連","DDRの常連"];
   let name = document.getElementById("who").value.trim().slice(0,16);
   if(!name) name = RANDOM_NAMES[Math.floor(Math.random()*RANDOM_NAMES.length)]; // 空欄ならランダム
-  const angle = isMobileView() ? (Math.random()<0.5?-4:4) : rndAngle();  // モバイルは左右4°のみ
+  const finalNow = isMobileView();   // モバイルはドロップで確定。PCは回転確定時にクールダウンを消費
+  const angle = finalNow ? (Math.random()<0.5?-4:4) : rndAngle();  // モバイルは左右4°のみ
   const img = pendingImg;
   const meta = { name, t: Date.now(), sou:0, del:0, hidden:false, nx, ny, angle, uid: myUid };  // 画像は含めない・作成者UID付き
   postBtn.disabled = true;
   try{
     const id = push(ref(db, "posts")).key;   // キーだけ先に確保（まだ書かない）
     seedImage(id, img);                       // 先にキャッシュ（自分の画像は取得不要）
-    // 画像・メタ・連投スロットルを1回の書き込みでまとめて確定（サーバ側でクールダウン判定）
-    await update(ref(db), {
-      ["imgs/"+id]: img,
-      ["posts/"+id]: meta,
-      ["throttle/"+myUid]: serverTimestamp()
-    });
-    lastPostAt = Date.now();
-    LS.set("fg_lastPost", String(lastPostAt));
+    // 画像・メタを書き込み。確定時のみスロットル（連投クールダウン）も同時に進める
+    const writes = { ["imgs/"+id]: img, ["posts/"+id]: meta };
+    if(finalNow) writes["throttle/"+myUid] = serverTimestamp();
+    await update(ref(db), writes);
+    if(finalNow){ lastPostAt = Date.now(); LS.set("fg_lastPost", String(lastPostAt)); }
     editingId = id;
     posts.set(id, meta);
     // 後片付け
@@ -1426,12 +1424,12 @@ async function createPost(nx, ny){
     ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); undoStack=[];
     LS.del("fg_draft");   // 貼ったので下書きは破棄
     setMsg("");
-    if(isMobileView()){
+    if(finalNow){
       editingId = null;          // モバイルは角度調整なし（ランダム±4°のまま）
       render();
     } else {
       render();
-      openRotor(id, angle);      // PCは半紙中央を軸にした弧型スライダーで回転
+      openRotor(id, angle);      // PCは半紙中央を軸にした弧型スライダーで回転（確定でクールダウン消費）
     }
   }catch(e){
     console.error(e);
@@ -1547,6 +1545,9 @@ function closeRotor(){
   const el = rotorNoteEl();
   if(el){ el.classList.remove("mine"); el.classList.remove("rotoring"); }   // テープが生えてくる
   rotorId = null; editingId = null; rotorDragging = false;
+  // ここで初めて連投クールダウンを消費（やめた場合は消費しない）
+  lastPostAt = Date.now(); LS.set("fg_lastPost", String(lastPostAt));
+  if(db && myUid){ set(ref(db, "throttle/"+myUid), serverTimestamp()).catch(()=>{}); }
 }
 function cancelRotor(){                         // 位置決めをやめる＝貼るのを取りやめ（半紙を消す）
   if(!rotorEl.classList.contains("show")) return;
