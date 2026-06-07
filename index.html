@@ -112,7 +112,7 @@
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
   @media(max-width:560px){
     .float-desk{width:min(300px,calc(100vw - 24px));left:12px;top:14px;max-height:calc(100dvh - 28px)}
-    .float-tools .zoom-ctl{display:none}
+    .float-tools .zoom-ctl input[type=range]{display:none}  /* モバイルは幅広スライダーだけ隠す（＋／−と％は残す） */
     .float-tools{padding:7px 11px}
   }
   .canvas-frame{
@@ -156,13 +156,13 @@
   .swatch.active{border-color:var(--sumi);box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--sumi)}
   .swatch.active::after{content:"";position:absolute;inset:0;border-radius:50%}
   .tool-label{font-size:12px;color:var(--ink-faint);font-weight:500;min-width:40px}
-  .brush-seg{display:flex;gap:0;border-radius:8px;overflow:hidden;box-shadow:inset 0 0 0 1px rgba(140,110,60,.35);flex:1}
+  .brush-seg{display:flex;gap:0;border-radius:8px;overflow:hidden;border:1px solid rgba(140,110,60,.35);flex:1}
   .brush-opt{
     flex:1;border:none;cursor:pointer;background:transparent;color:var(--ink-faint);
     font-family:"Shippori Mincho",serif;font-weight:700;font-size:13px;letter-spacing:.08em;
     padding:7px 4px;
   }
-  .brush-opt + .brush-opt{box-shadow:inset 1px 0 0 rgba(140,110,60,.35)}
+  .brush-opt + .brush-opt{border-left:1px solid rgba(140,110,60,.35)}
   .brush-opt.active{background:var(--shu);color:var(--paper)}
   .brush-opt:not(.active):hover{background:rgba(181,52,31,.1)}
   input[type=range]{flex:1;accent-color:var(--sumi)}
@@ -199,7 +199,6 @@
   }
   .btn-ghost:hover{filter:brightness(1.04)}
   .btn-ghost.active{background:var(--shu);color:var(--paper);box-shadow:inset 0 0 0 1px var(--shu)}
-  #photoBtn{font-size:11.5px;line-height:1.25}
   .btn-post{
     flex:1;
     background:var(--shu);color:var(--paper);
@@ -589,13 +588,13 @@
         </div>
 
         <div class="btns" style="margin-bottom:8px">
-          <button class="btn-ghost" id="undo">もどす</button>
-          <button class="btn-ghost" id="clear">消去</button>
-          <button class="btn-ghost" id="fillBtn">塗り</button>
-          <button class="btn-ghost" id="photoBtn">写真<br>読込</button>
+          <button class="btn-ghost" id="undo">戻</button>
+          <button class="btn-ghost" id="fillBtn">塗</button>
+          <button class="btn-ghost" id="photoBtn">写真</button>
+          <button class="btn-ghost" id="clear">消</button>
         </div>
         <input type="file" id="photoInput" accept="image/*" style="display:none">
-        <div class="hint">会場のお習字撮影は自分のもの限定。会場では撮影登録が必要です。</div>
+        <div class="hint">お習字撮影は自分のもの限定。要撮影登録</div>
       </div>
       <div class="desk-foot">
         <input class="name-field" id="who" type="text" maxlength="16" placeholder="名前（空欄ならランダム）">
@@ -1313,7 +1312,7 @@ notesEl.addEventListener("click", e=>{
   raiseNote(note.dataset.id);
   setActive(note.dataset.id);
 });
-document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ if(rotorEl.classList.contains("show")) cancelRotor(); else if(placing) cancelPlacing(); } });
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && placing) cancelPlacing(); });
 document.addEventListener("keydown", e=>{
   if((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key==="z" || e.key==="Z")){
     const t = e.target;
@@ -1532,6 +1531,8 @@ document.addEventListener("pointerdown", e=>{
   if(rotorEl.classList.contains("show") && (Date.now()-rotorOpenedAt > 400) && !rotorEl.contains(e.target)) closeRotor();
 });
 scrollEl.addEventListener("scroll", ()=>{ if(rotorEl.classList.contains("show")) positionRotor(); }, {passive:true});
+// 回転位置決め中はEscでキャンセル（最初の角度に戻して閉じる）
+document.addEventListener("keydown", e=>{ if(e.key==="Escape" && rotorEl.classList.contains("show")){ e.preventDefault(); cancelRotor(); } });
 
 /* ---------- voting (transaction) ---------- */
 async function vote(type, id){
@@ -1660,6 +1661,33 @@ scrollEl.addEventListener("touchmove", e=>{
 }, {passive:false});
 scrollEl.addEventListener("touchend", e=>{ if(e.touches.length<2) pinchActive=false; });
 scrollEl.addEventListener("touchcancel", ()=>{ pinchActive=false; });
+
+/* ダブルクリック／ダブルタップ：何もない所は拡大、半紙はフォーカスして拡大（PC・モバイル共通） */
+function doubleActivate(clientX, clientY, noteElm){
+  const hit = document.elementFromPoint(clientX, clientY);
+  const ne = noteElm || (hit ? hit.closest(".note") : null);
+  if(ne){
+    const id = ne.dataset.id, p = posts.get(id);
+    if(p){ raiseNote(id); setActive(id); centerOnNote(id, p, Math.min(ZOOM_MAX, Math.max(1.5, zoom))); return; }
+  }
+  zoomTo(Math.min(ZOOM_MAX, Math.max(1.5, zoom*1.6)), clientX, clientY);   // 何もない所は拡大
+}
+scrollEl.addEventListener("dblclick", e=>{
+  if(placing) return;
+  e.preventDefault();
+  doubleActivate(e.clientX, e.clientY, e.target.closest(".note"));
+});
+let lastTapT=0, lastTapX=0, lastTapY=0;
+scrollEl.addEventListener("touchend", e=>{
+  if(placing || pinchActive || e.changedTouches.length!==1) return;
+  const t = e.changedTouches[0], now = Date.now();
+  if(now-lastTapT < 300 && Math.hypot(t.clientX-lastTapX, t.clientY-lastTapY) < 30){
+    lastTapT = 0;
+    doubleActivate(t.clientX, t.clientY, null);   // ダブルタップ
+  } else {
+    lastTapT = now; lastTapX = t.clientX; lastTapY = t.clientY;
+  }
+}, {passive:true});
 
 // 左ドラッグでボード内を動かす（マウスのみ。タッチは標準スクロール）
 let panning=false, panMoved=false, panSX=0, panSY=0, panSL=0, panST=0, suppressClick=false;
@@ -1862,10 +1890,10 @@ function runGuide(){
 
 /* ---------- init ---------- */
 setupCanvas();
-// デフォルトの太さをスライダーの1割〜4割の位置でランダムに
+// デフォルトの太さをスライダーの0〜15%の位置でランダムに
 (function(){
   const sl = document.getElementById("size");
-  const pos = 10 + Math.floor(Math.random()*31);   // 位置10〜40%
+  const pos = Math.floor(Math.random()*16);   // 位置0〜15%
   sl.value = pos;
   size = sizeFromPos(pos);
   // 筆の種類もランダム（先細／丸筆／平筆）
