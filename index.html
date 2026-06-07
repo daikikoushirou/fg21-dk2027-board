@@ -104,7 +104,7 @@
     display:flex;align-items:center;justify-content:center;padding:0;
   }
   .desk-toggle:hover{filter:brightness(1.04)}
-  .desk-body{padding:0 16px 16px;overflow-y:auto;min-height:0;flex:1 1 auto;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
+  .desk-body{padding:0 16px 0;overflow-x:hidden;overflow-y:auto;min-height:0;flex:1 1 auto;-webkit-overflow-scrolling:touch}
   .float-desk.collapsed .desk-body{display:none}
   .float-desk.collapsed{width:auto;max-width:none}
   .float-desk.collapsed .desk-bar{padding-bottom:10px}
@@ -135,7 +135,16 @@
     cursor:crosshair;
   }
 
-  .tools{margin-top:10px;flex:1 1 auto;min-height:110px;overflow-y:auto;padding:6px 6px 0}
+  .tools{margin-top:10px;padding:6px 6px 0}
+  /* 貼るボタンはスクロール外に常時固定（iOSでスクロールバーが出なくても見える） */
+  .desk-foot{
+    position:sticky;bottom:0;z-index:2;
+    margin:8px -16px 0;padding:10px 16px 14px;
+    background:#e7d9bb;
+    border-top:1px solid rgba(140,110,60,.30);
+    box-shadow:0 -10px 12px -10px rgba(60,40,10,.20);
+  }
+  .desk-foot .name-field{margin-bottom:8px}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
   .swatch{
     width:30px;height:30px;border-radius:50%;
@@ -530,11 +539,13 @@
           <button class="btn-ghost" id="photoBtn">写真読込</button>
         </div>
         <input type="file" id="photoInput" accept="image/*" style="display:none">
+        <div class="hint">会場のお習字撮影は自分のもの限定。会場では撮影登録が必要です。</div>
+      </div>
+      <div class="desk-foot">
         <input class="name-field" id="who" type="text" maxlength="16" placeholder="名前（空欄ならランダム）">
         <div class="btns">
           <button class="btn-post" id="post">貼 る</button>
         </div>
-        <div class="hint">会場のお習字撮影は自分のもの限定。会場では撮影登録が必要です。</div>
       </div>
     </div>
   </section>
