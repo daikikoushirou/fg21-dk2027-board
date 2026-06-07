@@ -300,7 +300,7 @@
     border-radius:3px;
     box-shadow:0 7px 16px rgba(0,0,0,.4);
     display:flex;flex-direction:column;
-    transform-origin:50% 0;
+    transform-origin:50% 50%;
     animation:drop .45s cubic-bezier(.2,.9,.3,1.2) both;
   }
   .note.no-anim{animation:none}
@@ -321,6 +321,8 @@
     background:rgba(216,201,168,.62);
     box-shadow:0 1px 3px rgba(0,0,0,.2);z-index:2;
   }
+  /* 反転（180°）した半紙はテープを反対の端へ＝画面上では上側に来る */
+  .note.flipped .tape{top:auto;bottom:-9px}
   .note .who{
     font-size:10px;color:var(--ink-faint);
     text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -386,6 +388,36 @@
   .rotor:active{cursor:grabbing}
   .rotor svg{display:block;overflow:visible;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
   .rotor #rotorHandle{cursor:grab}
+  .rotor-flip{
+    position:absolute;left:50%;top:0;transform:translateX(-50%);
+    font-size:15px;line-height:1;padding:5px 12px;border-radius:999px;
+    background:#e7d9bb;color:var(--shu-deep);
+    box-shadow:0 2px 6px rgba(0,0,0,.3), inset 0 0 0 1px rgba(140,110,60,.4);
+    cursor:pointer;user-select:none;
+  }
+  .rotor-flip.active{background:var(--shu);color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3)}
+  /* 初回ガイド：中央で点滅→左上のバー位置へ移動 */
+  .guide{
+    position:fixed;z-index:80;
+    display:flex;align-items:center;gap:10px;
+    padding:13px 20px;border-radius:13px;
+    background:linear-gradient(150deg,#efe6cf,#e5d7b4);
+    color:var(--ink-faint);
+    font-family:"Shippori Mincho",serif;font-weight:700;font-size:16px;white-space:nowrap;
+    box-shadow:0 12px 32px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.4);
+    opacity:0;pointer-events:none;cursor:pointer;
+    transition:left .75s cubic-bezier(.4,0,.2,1), top .75s cubic-bezier(.4,0,.2,1), transform .75s cubic-bezier(.4,0,.2,1), opacity .45s;
+  }
+  .guide .g-plus{
+    width:24px;height:24px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--shu);color:#fff;font-size:17px;line-height:1;
+  }
+  .guide.show{opacity:1;pointer-events:auto;animation:guidePulse 1s ease-in-out infinite}
+  @keyframes guidePulse{
+    0%,100%{box-shadow:0 12px 32px rgba(0,0,0,.45), 0 0 0 0 rgba(181,52,31,0)}
+    50%{box-shadow:0 12px 32px rgba(0,0,0,.45), 0 0 0 7px rgba(181,52,31,.30)}
+  }
   .anglebar .lab{font-family:"Shippori Mincho",serif;font-weight:700;font-size:13px;color:var(--ink-faint)}
   .anglebar input[type=range]{flex:1;min-width:140px;accent-color:var(--shu)}
   .anglebar .val{font-size:13px;font-weight:700;color:var(--shu-deep);min-width:42px;text-align:right}
@@ -568,6 +600,7 @@
     <button class="ok" id="angleOk">確定</button>
   </div>
   <div class="rotor" id="rotor"></div>
+  <div class="guide" id="guide"><span>半紙を広げる</span><span class="g-plus">＋</span></div>
 
   <div class="nav-cluster">
     <div class="meguri">
@@ -1117,6 +1150,8 @@ function render(){
     const left = clamp(nxOf(p,p.id),0,1) * (WALL_W-NOTE_W);
     const top  = clamp(nyOf(p,p.id),0,1) * (WALL_H-NOTE_H);
     const ang  = angOf(p,p.id);
+    const aNorm = ((ang%360)+360)%360;
+    const flippedCls = (aNorm>90 && aNorm<270) ? " flipped" : "";   // 上下反転している半紙
     const cached = imgCache.get(p.id) || p.img || "";
     const imgHtml = `<img class="note-img${cached?' ready':''}" alt=""${cached?` src="${cached}"`:''}>`;
     const souCls = souDone.has(p.id) ? "sou-btn done" : "sou-btn";
@@ -1134,7 +1169,7 @@ function render(){
       </div>` : '';
     const zr = zOverride.has(p.id) ? `;z-index:${zOverride.get(p.id)}` : "";
     return `
-    <div class="note${mine}${fresh} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)${zr}">
+    <div class="note${mine}${fresh}${flippedCls} ${p.hidden?'is-hidden':''}" data-id="${p.id}" style="left:${left}px;top:${top}px;transform:rotate(${ang}deg)${zr}">
       <span class="tape" style="--r:${tapeColor()}deg"></span>
       <div class="imgwrap">${hiddenBadge}${imgHtml}</div>
       <div class="who">${esc(p.name)||"としあき"}</div>
@@ -1303,7 +1338,7 @@ async function createPost(nx, ny){
     // 後片付け
     placing = false; ghostEl.classList.remove("show"); wallEl.classList.remove("placing");
     postBtn.textContent = "貼 る";
-    setDeskCollapsed(isMobileView() ? true : deskPrevCollapsed);   // モバイルは貼ったら閉じる
+    setDeskCollapsed(true);   // 貼ったら半紙は閉じる（PC・モバイルとも）
     ctx.fillStyle=PAPER; ctx.fillRect(0,0,pad.width,pad.height); undoStack=[];
     setMsg("");
     if(isMobileView()){
@@ -1367,10 +1402,11 @@ document.addEventListener("pointerdown", e=>{
   if(angleBar.classList.contains("show") && (Date.now()-angleOpenedAt > 400) && !angleBar.contains(e.target)) closeAngle();
 });
 
-/* ---------- PC: 弧型の回転スライダー ---------- */
+/* ---------- PC: 弧型の回転スライダー（±20°）＋ 上下反転 ---------- */
 const rotorEl = document.getElementById("rotor");
 let rotorId = null, rotorR = 0, rotorOpenedAt = 0, rotorDragging = false;
-const ROTOR_MAX = 40;                       // 回転の上限（左右40°）
+let rotorTilt = 0, rotorFlipped = false;     // 傾き(±20)と反転(180°)を分けて保持
+const ROTOR_MAX = 20;                        // 傾きの上限（左右20°）
 function rotorCenter(){
   const p = posts.get(rotorId); if(!p) return null;
   const r = wallEl.getBoundingClientRect();  // 拡縮・スクロール済みの矩形
@@ -1379,16 +1415,16 @@ function rotorCenter(){
     cy: r.top  + (clamp(nyOf(p,rotorId),0,1)*(WALL_H-NOTE_H) + NOTE_H/2)*zoom
   };
 }
-function rotorPoint(angle, R, Rt){           // 角度→ハンドル座標（真下=0、左で＋）
+function rotorPoint(angle, R, Rt){           // 傾き→ハンドル座標（真下=0、左で＋）
   const rad = angle*Math.PI/180;
   return { x:(R - Math.sin(rad)*Rt), y:(R + Math.cos(rad)*Rt) };
 }
-function buildRotor(angle){
+function buildRotor(){
   const R = NOTE_H*zoom*0.5 + 42; rotorR = R;
   const Rt = R - 12;
   let pts = [];
-  for(let t=-ROTOR_MAX;t<=ROTOR_MAX;t+=2){ const q=rotorPoint(t,R,Rt); pts.push(q.x.toFixed(1)+","+q.y.toFixed(1)); }
-  const h = rotorPoint(angle,R,Rt);
+  for(let t=-ROTOR_MAX;t<=ROTOR_MAX;t+=1){ const q=rotorPoint(t,R,Rt); pts.push(q.x.toFixed(1)+","+q.y.toFixed(1)); }
+  const h = rotorPoint(rotorTilt,R,Rt);
   rotorEl.style.width = rotorEl.style.height = (2*R)+"px";
   rotorEl.innerHTML =
     `<svg width="${2*R}" height="${2*R}" viewBox="0 0 ${2*R} ${2*R}">`+
@@ -1396,47 +1432,65 @@ function buildRotor(angle){
     `<line id="rotorStem" x1="${R}" y1="${R}" x2="${h.x.toFixed(1)}" y2="${h.y.toFixed(1)}" stroke="rgba(181,52,31,.35)" stroke-width="2"/>`+
     `<circle cx="${R}" cy="${R}" r="3" fill="rgba(181,52,31,.6)"/>`+
     `<circle id="rotorHandle" cx="${h.x.toFixed(1)}" cy="${h.y.toFixed(1)}" r="10" fill="#b5341f" stroke="#fff" stroke-width="2.5"/>`+
-    `</svg>`;
+    `</svg>`+
+    `<button class="rotor-flip${rotorFlipped?' active':''}" id="rotorFlip" title="上下反転">⇅ 反転</button>`;
 }
 function positionRotor(){
   const c = rotorCenter(); if(!c) return;
   rotorEl.style.left = (c.cx - rotorR) + "px";
   rotorEl.style.top  = (c.cy - rotorR) + "px";
 }
-function openRotor(id, angle){
-  rotorId = id;
-  buildRotor(clamp(angle,-ROTOR_MAX,ROTOR_MAX));
-  positionRotor();
-  rotorEl.classList.add("show");
-  rotorOpenedAt = Date.now();
-}
-function rotorSetAngle(angle, write){
-  angle = clamp(Math.round(angle), -ROTOR_MAX, ROTOR_MAX);
-  const p = posts.get(rotorId); if(p) p.angle = angle;
-  setNoteTransform(rotorId, angle);
-  const h = rotorPoint(angle, rotorR, rotorR-12);
+function applyRotor(write){
+  const eff = rotorTilt + (rotorFlipped ? 180 : 0);   // 実際の回転角
+  const p = posts.get(rotorId); if(p) p.angle = eff;
+  setNoteTransform(rotorId, eff);
+  const el = rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null;
+  if(el) el.classList.toggle("flipped", rotorFlipped);  // テープ位置を反転に追従
+  const h = rotorPoint(rotorTilt, rotorR, rotorR-12);
   const hd = rotorEl.querySelector("#rotorHandle"), st = rotorEl.querySelector("#rotorStem");
   if(hd){ hd.setAttribute("cx", h.x.toFixed(1)); hd.setAttribute("cy", h.y.toFixed(1)); }
   if(st){ st.setAttribute("x2", h.x.toFixed(1)); st.setAttribute("y2", h.y.toFixed(1)); }
-  if(write && db) update(ref(db, "posts/"+rotorId), { angle }).catch(()=>{});
+  if(write && db) update(ref(db, "posts/"+rotorId), { angle:eff }).catch(()=>{});
+}
+function rotorSetTilt(tilt, write){
+  rotorTilt = clamp(Math.round(tilt), -ROTOR_MAX, ROTOR_MAX);
+  applyRotor(write);
+}
+function toggleFlip(){
+  rotorFlipped = !rotorFlipped;
+  const b = rotorEl.querySelector("#rotorFlip"); if(b) b.classList.toggle("active", rotorFlipped);
+  applyRotor(true);
 }
 function angleFromPointer(e){
   const c = rotorCenter(); if(!c) return 0;
   const dx = e.clientX - c.cx, dy = e.clientY - c.cy;
   return Math.atan2(-dx, dy) * 180/Math.PI;   // 真下=0、左へ回すと＋
 }
+function openRotor(id, angle){
+  rotorId = id;
+  let a = ((angle%360)+360)%360;               // 0..360
+  rotorFlipped = (a>90 && a<270);
+  let tilt = rotorFlipped ? a-180 : (a>180 ? a-360 : a);
+  rotorTilt = clamp(Math.round(tilt), -ROTOR_MAX, ROTOR_MAX);
+  buildRotor();
+  positionRotor();
+  rotorEl.classList.add("show");
+  rotorOpenedAt = Date.now();
+}
 function closeRotor(){
   if(!rotorEl.classList.contains("show")) return;
-  const p = posts.get(rotorId);
-  rotorSetAngle(p ? p.angle : 0, true);        // 最終角を保存
+  applyRotor(true);                            // 最終状態を保存
   rotorEl.classList.remove("show");
   const el = rotorId ? notesEl.querySelector('.note[data-id="'+rotorId+'"]') : null;
   if(el) el.classList.remove("mine");
   rotorId = null; editingId = null; rotorDragging = false;
 }
-rotorEl.addEventListener("pointerdown", e=>{ e.preventDefault(); rotorDragging = true; rotorSetAngle(angleFromPointer(e), false); });
-window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorSetAngle(angleFromPointer(e), false); });
-window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; const p = posts.get(rotorId); rotorSetAngle(p?p.angle:0, true); } });
+rotorEl.addEventListener("pointerdown", e=>{
+  if(e.target.closest("#rotorFlip")){ e.preventDefault(); e.stopPropagation(); toggleFlip(); return; }  // 反転ボタン
+  e.preventDefault(); rotorDragging = true; rotorSetTilt(angleFromPointer(e), false);
+});
+window.addEventListener("pointermove", e=>{ if(rotorDragging) rotorSetTilt(angleFromPointer(e), false); });
+window.addEventListener("pointerup", ()=>{ if(rotorDragging){ rotorDragging = false; rotorSetTilt(rotorTilt, true); } });
 // 外側をクリックで確定（開いた直後の一瞬は無視）
 document.addEventListener("pointerdown", e=>{
   if(rotorEl.classList.contains("show") && (Date.now()-rotorOpenedAt > 400) && !rotorEl.contains(e.target)) closeRotor();
@@ -1744,6 +1798,28 @@ function setDeskCollapsed(c){
 }
 deskBar.addEventListener("click", ()=> setDeskCollapsed(!floatDesk.classList.contains("collapsed")));
 
+/* 初回ガイド：画面中央で点滅 → 左上の「半紙を広げる」バーへ移動して点滅 → 消える */
+function runGuide(){
+  const guide = document.getElementById("guide");
+  if(!guide) return;
+  if(!floatDesk.classList.contains("collapsed")) return;   // すでに開いていれば出さない
+  guide.style.left = (window.innerWidth/2) + "px";
+  guide.style.top  = (window.innerHeight/2) + "px";
+  guide.style.transform = "translate(-50%,-50%)";
+  guide.classList.add("show");
+  let done = false;
+  const finish = ()=>{ if(done) return; done = true; guide.classList.remove("show"); setTimeout(()=>guide.remove(), 500); };
+  guide.addEventListener("click", ()=>{ setDeskCollapsed(false); finish(); });
+  setTimeout(()=>{                                  // 左上の実際のバー位置へ移動
+    if(done) return;
+    const r = floatDesk.getBoundingClientRect();
+    guide.style.left = r.left + "px";
+    guide.style.top  = r.top + "px";
+    guide.style.transform = "translate(0,0)";
+  }, 1700);
+  setTimeout(finish, 4400);                          // 自動で消える
+}
+
 /* ---------- init ---------- */
 setupCanvas();
 // デフォルトの太さをスライダーの1割〜4割の位置でランダムに
@@ -1759,9 +1835,10 @@ setupCanvas();
 if (document.fonts && document.fonts.load) { document.fonts.load('700 20px "Shippori Mincho"').catch(()=>{}); }
 computeZoomMin();
 applyZoom();
-if(isMobileView()) setDeskCollapsed(true);   // モバイルは初期状態で閉じる
+setDeskCollapsed(true);   // 初期状態は閉じる（PC・モバイルとも）
 requestAnimationFrame(()=>{ randomStartScroll(); drawMinimap(); });
 listen();
+setTimeout(runGuide, 600);   // 初回ガイド通知
 </script>
 </body>
 </html>
