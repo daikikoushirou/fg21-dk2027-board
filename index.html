@@ -686,7 +686,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 /* ---------- 画像置き場（Supabase Storage） ---------- */
 // 画像“本体”だけ Supabase に保存。Firebaseには画像のパス文字列(imgPath)のみ持たせる（将来R2へ移しやすい形）
 const SUPA_URL    = "https://oicwpmyvophbzfaqfbka.supabase.co";   // board プロジェクト
-const SUPA_ANON   = "（ここに board プロジェクトの anon 公開キーを貼る：Settings > API）";
+const SUPA_ANON   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9pY3dwbXl2b3BoYnpmYXFmYmthIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjE0NzcsImV4cCI6MjA5NjU5NzQ3N30.A-p35FfNVAyCw2GMZ3DNnQwwlTSp1y_ZiJQOrzVP_lw";
 const SUPA_BUCKET = "board-images";
 let supa = null;
 try { supa = createClient(SUPA_URL, SUPA_ANON); } catch(e) { console.error("Supabase init failed", e); }
