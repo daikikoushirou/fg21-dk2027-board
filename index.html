@@ -681,6 +681,17 @@ import {
   getAuth, onAuthStateChanged, signInAnonymously,
   signInWithEmailAndPassword, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+/* ---------- 画像置き場（Supabase Storage） ---------- */
+// 画像“本体”だけ Supabase に保存。Firebaseには画像のパス文字列(imgPath)のみ持たせる（将来R2へ移しやすい形）
+const SUPA_URL    = "https://oicwpmyvophbzfaqfbka.supabase.co";   // board プロジェクト
+const SUPA_ANON   = "（ここに board プロジェクトの anon 公開キーを貼る：Settings > API）";
+const SUPA_BUCKET = "board-images";
+let supa = null;
+try { supa = createClient(SUPA_URL, SUPA_ANON); } catch(e) { console.error("Supabase init failed", e); }
+function imgUrl(path){ return SUPA_URL + "/storage/v1/object/public/" + SUPA_BUCKET + "/" + path; }   // 公開URLの組み立て
+function isSafePath(p){ return typeof p==="string" && p.length<200 && /^[A-Za-z0-9_./-]+$/.test(p) && !p.includes(".."); }   // 変な値を弾く
 
 let db = null, auth = null;
 try {
@@ -1048,6 +1059,21 @@ function exportImage(){
   if(!data.startsWith("data:image/webp")) data = out.toDataURL("image/jpeg", 0.7);
   return data;
 }
+function exportImageBlob(){   // アップロード用：同じ絵をBlobで（WebP優先・非対応はJPEG）
+  const out = document.createElement("canvas");
+  out.width = 220; out.height = 330;
+  const o = out.getContext("2d");
+  o.fillStyle = PAPER; o.fillRect(0,0,220,330);
+  o.drawImage(pad,0,0,220,330);
+  const side = 62, margin = 14;
+  drawSeal(o, 220-margin-side, 330-margin-side, side);
+  return new Promise(res=>{
+    out.toBlob(b=>{
+      if(b && b.type==="image/webp") res({ blob:b, ext:"webp", type:"image/webp" });
+      else out.toBlob(b2=> res(b2 ? { blob:b2, ext:"jpg", type:"image/jpeg" } : null), "image/jpeg", 0.7);
+    }, "image/webp", 0.72);
+  });
+}
 function isBlank(){
   // sample a downscale and check variance vs paper
   const t=document.createElement("canvas"); t.width=40;t.height=60;
@@ -1146,20 +1172,29 @@ function seedImage(id, data){   // 自分の投稿などをキャッシュに先
   if(!isImgData(data)) return;
   imgCache.set(id, data); imgState.set(id, "loaded"); idbPut(id, data);
 }
+function noteImgSrc(id){
+  const data = imgCache.get(id);
+  if(isImgData(data)) return data;                       // 自分の投稿など（dataURL・このセッション）
+  const p = posts.get(id);
+  if(p && isSafePath(p.imgPath)) return imgUrl(p.imgPath);// Supabase 公開URL
+  if(p && isImgData(p.img)) return p.img;                // 旧：埋め込みdataURL
+  return null;
+}
 function setNoteImg(id){
-  const data = imgCache.get(id); if(!isImgData(data)) return;   // dataURLのみ。属性ではなくプロパティ代入（XSS安全）
+  const src = noteImgSrc(id); if(!src) return;           // プロパティ代入（XSS安全）
   const el = notesEl.querySelector('.note[data-id="'+id+'"] .note-img');
-  if(el){ el.src = data; el.classList.add("ready"); }
+  if(el){ el.src = src; el.classList.add("ready"); }
 }
 async function loadImage(id){
   if(imgState.get(id)==="loaded" || imgState.get(id)==="loading") return;
   const p = posts.get(id);
-  if(p && isImgData(p.img)){ seedImage(id, p.img); setNoteImg(id); return; } // 旧形式（埋め込み）に対応
+  if(p && isImgData(p.img)){ seedImage(id, p.img); setNoteImg(id); return; }      // 旧：埋め込み
+  if(imgCache.has(id)){ imgState.set(id,"loaded"); setNoteImg(id); return; }       // 自分の投稿（dataURL）
+  if(p && isSafePath(p.imgPath)){ imgState.set(id,"loaded"); setNoteImg(id); return; } // Supabase：ブラウザがHTTPキャッシュ
+  // 旧データ救済：base64がRTDBにある場合だけ取得
   imgState.set(id, "loading");
-  // 1) IndexedDB
   const local = await idbGet(id);
   if(isImgData(local)){ imgCache.set(id, local); imgState.set(id,"loaded"); setNoteImg(id); return; }
-  // 2) サーバから1枚だけ取得
   try{
     const snap = await get(ref(db, bpath("imgs/"+id)));
     const data = snap && snap.val();
@@ -1540,9 +1575,26 @@ async function createPost(nx, ny){
     reserved = true;
 
     const id = push(ref(db, bpath("posts"))).key;   // キーだけ先に確保（まだ書かない）
-    seedImage(id, img);                              // 先にキャッシュ（自分の画像は取得不要）
-    // 画像・メタを書き込み。確定時のみスロットル（連投クールダウン）も同時に進める
-    const writes = { [bpath("imgs/"+id)]: img, [bpath("posts/"+id)]: meta };
+    seedImage(id, img);                              // 先にキャッシュ（自分の画像は即表示）
+
+    // 画像本体は Supabase Storage へ。失敗時は従来どおり Firebase に base64 で保存（無停止フォールバック）
+    let imgPath = null;
+    const useSupa = supa && !SUPA_ANON.startsWith("（");
+    if(useSupa){
+      try{
+        const fileBlob = await (await fetch(img)).blob();
+        const ext = (fileBlob.type === "image/webp") ? "webp" : "jpg";
+        const path = "boards/" + boardId + "/" + id + "." + ext;
+        const { error } = await supa.storage.from(SUPA_BUCKET).upload(path, fileBlob, { contentType: fileBlob.type, upsert: true });
+        if(error) throw error;
+        imgPath = path;
+      }catch(e){ console.error("Supabase upload失敗→Firebaseへ退避", e); imgPath = null; }
+    }
+    if(imgPath) meta.imgPath = imgPath;
+
+    // メタを書き込み。imgPathが無い時だけ画像base64も書く。確定時のみスロットルも進める
+    const writes = { [bpath("posts/"+id)]: meta };
+    if(!imgPath) writes[bpath("imgs/"+id)] = img;
     if(finalNow) writes["throttle/"+myUid] = serverTimestamp();
     await update(ref(db), writes);
     reserved = false;   // 書き込み成功＝枠は確定
@@ -1817,19 +1869,19 @@ async function archiveAndAdvance(){
   try{
     // 表示対象（運営は全件）の半紙を集める
     const list = [...posts.entries()].map(([id,p])=>({id,...p})).filter(p=> typeof p.id==="string");
-    // 画像を全部読み込む（キャッシュに無いものはサーバから取得）
+    // 旧base64データだけ先読み（Supabase画像はURLから直接読む）
     await Promise.all(list.map(async p=>{
-      if(isImgData(imgCache.get(p.id))) return;
+      if(isImgData(imgCache.get(p.id)) || isSafePath(p.imgPath)) return;
       try{ const s = await get(ref(db, bpath("imgs/"+p.id))); const d = s && s.val(); if(isImgData(d)) imgCache.set(p.id, d); }catch(e){}
     }));
     // 大きなキャンバスへ合成
     const cv = document.createElement("canvas"); cv.width = WALL_W; cv.height = WALL_H;
     const g = cv.getContext("2d");
     g.fillStyle = "#ece3cd"; g.fillRect(0,0,WALL_W,WALL_H);   // 壁の色
-    const loadImg = src => new Promise(res=>{ const im=new Image(); im.onload=()=>res(im); im.onerror=()=>res(null); im.src=src; });
+    const loadImg = src => new Promise(res=>{ const im=new Image(); im.crossOrigin="anonymous"; im.onload=()=>res(im); im.onerror=()=>res(null); im.src=src; });
     for(const p of list){
-      const data = imgCache.get(p.id); if(!isImgData(data)) continue;
-      const im = await loadImg(data); if(!im) continue;
+      const src = noteImgSrc(p.id); if(!src) continue;        // dataURL か Supabase 公開URL
+      const im = await loadImg(src); if(!im) continue;
       const x = clamp(nxOf(p,p.id),0,1)*(WALL_W-NOTE_W);
       const y = clamp(nyOf(p,p.id),0,1)*(WALL_H-NOTE_H);
       const w = NOTE_W, h = NOTE_W*1.5;          // 半紙の画像部（2:3）
