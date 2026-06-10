@@ -1585,7 +1585,7 @@ async function createPost(nx, ny){
         const fileBlob = await (await fetch(img)).blob();
         const ext = (fileBlob.type === "image/webp") ? "webp" : "jpg";
         const path = "boards/" + boardId + "/" + id + "." + ext;
-        const { error } = await supa.storage.from(SUPA_BUCKET).upload(path, fileBlob, { contentType: fileBlob.type, upsert: true });
+        const { error } = await supa.storage.from(SUPA_BUCKET).upload(path, fileBlob, { contentType: fileBlob.type, upsert: false });
         if(error) throw error;
         imgPath = path;
       }catch(e){ console.error("Supabase upload失敗→Firebaseへ退避", e); imgPath = null; }
